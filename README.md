@@ -41,8 +41,7 @@ Calculating the effects of finite gain-bandwidth on the frequency response is qu
 
 The software may be downloaded using the link here.
 
-https://github.com/radams2000/Python_LTspice_opt/releases/tag/v0.1.0
-
+[Python_LTspice_opt](https://github.com/radams2000/Python_LTspice_opt/releases/)
 
 
 Download the zip file, and unzip in a directory on your computer. Move all the Python ".py" files to a directory where you will run Python. Move the LTspice ".asc" files to a directory where you will store your schematics. See the README.pdf file for detailed instructions on how to run the Python program, and what other Python packages need to be installed.
