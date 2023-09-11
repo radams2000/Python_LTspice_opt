@@ -20,11 +20,10 @@ def setTarget(freqx, match_mode):
     deltai = f1i - f1ai
     rng = np.arange(f1ai, f1i)
     err_weights[rng] = 1 + 4 * (rng - f1ai) / deltai
-    tmp = len(freqx)
-    rng = np.arange(f2i,tmp)
-    ll = len(rng);
-    deltai = tmp-f2i
-    err_weights[rng]=20- 10*(rng-rng[0]) / deltai
+    #tmp = len(freqx)
+    #rng = np.arange(f2i,tmp)
+    #deltai = tmp-f2i
+    #err_weights[rng]=20- 10*(rng-rng[0]) / deltai
 
     # plot the target response and error weighting function
     plt.figure()

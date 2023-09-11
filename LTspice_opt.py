@@ -9,7 +9,7 @@
 ## See any of the example files in this distribution for an example
 ## Change the following line to point to your own setup file.
 
-from example1_setup import simControl, setTarget
+from example2_setup import simControl, setTarget
 
 # notes:
 
@@ -85,11 +85,13 @@ def optLTspice(optParams, *args, **kwargs): # this is the evaluation function ca
 
 
     for k in range(numOptd):
-        netlist[OptLine[k]][3] = f'{optParams[k] * nomParams[k]:.12e}'
+        #netlist[OptLine[k]][3] = f'{optParams[k] * nomParams[k]:.12e}'
+        netlist[OptLine[k]][3] = f'{nomParams[k]*np.exp(optParams[k]):.12e}'
 
     print('\ncurrent component values')
     for k in range(numOptd):
-        print(f'{netlist[OptLine[k]][0]} {optParams[k] * nomParams[k]:.12e}')
+        #print(f'{netlist[OptLine[k]][0]} {optParams[k] * nomParams[k]:.12e}')
+        print(f'{netlist[OptLine[k]][0]} {nomParams[k] * np.exp(optParams[k]):.12e}')
 
     with open(netlist_fname, 'w') as fid_wr_netlist:
         for k in range(numlines_netlist):
@@ -220,7 +222,9 @@ def update_schematic(pass2schem, simctrl):
                     xx = simctrlOptInstNames.index(instNm)
                     # Next line has the value to change
                     changeNext = True
-                    instValNext = X[kk] * nomParams[kk]
+                    #instValNext = X[kk] * nomParams[kk]
+                    instValNext = nomParams[kk] * np.exp(X[kk])
+
                     roundStringNext = simctrlInstTol[xx]
 
         new_schem.append(' '.join(line) + '\n')
@@ -359,7 +363,6 @@ def main():
     simControlMaxVals = simControlData[5]
     simControlInstTol = simControlData[6]
     simControlOPtInstNames = simControlData[3]
-    #LTspice_simTime = simControlData[7]  # How long to wait for LTspice to finish sim
     LTspice_output_node = simControlData[7]
     matchMode = simControlData[8]  # 1 = ampl only, 2 = phase only, 3 = both
 
@@ -476,8 +479,7 @@ def main():
     # need to search through the entire netlist each time
     numOptd = len(simControlOPtInstName)  # Number of instances being optimized
     OptLine = [0] * numOptd  # An array that points to the netlist lines with the instance names to be optimized
-    UB = [0.0] * numOptd  # Upper bound for optimizer
-    LB = [0.0] * numOptd  # Lower bound for optimizer
+
 
     kkk = 1
     OptLine = [0] * numOptd  # Initialize the OptLine array
@@ -544,15 +546,18 @@ def main():
 
     print('\n****************\n**************\nEntering Optimization Loop, please be patient ...\n************\n***********\n')
 
-    UB = [ub / nom for ub, nom in zip(UB, nomParams)]  # Translate upper bounds into relative upper bounds
-    LB = [lb / nom for lb, nom in zip(LB, nomParams)]  # Translate lower bounds into relative lower bounds
-    
-    optParams = np.ones(numOptd)
-    # note the starting values are all 1's. That's because we multiply the least-sq input
-    # starting values by the initial component values inside the evaluation function.
-    # I do this because the component values have an extreme range (from 1e-12 to 1e8 or so)
-    # this makes it hard for the least-sq function to calculate an appropriate step size
-    # when computing derivatives
+    #UB = [ub / nom for ub, nom in zip(UB, nomParams)]  # Translate upper bounds into relative upper bounds
+    #LB = [lb / nom for lb, nom in zip(LB, nomParams)]  # Translate lower bounds into relative lower bounds
+    # val = nom_val*exp(X), log(val)=X+log(nom_val), X = log(val)-log(nom_val), Xmax=log(val_max)-log(nom_val)
+    # Xmin = log(val_min)-log(nom_val)
+    for k in range(numOptd):
+        UB[k] = np.log(UB[k]) - np.log(nomParams[k])
+        LB[k] = np.log(LB[k]) - np.log(nomParams[k])
+
+    #optParams = np.ones(numOptd)
+    optParams = np.zeros(numOptd) # start at 0 for ratiometric, because e^0 = 1
+    # note the starting values are all 0's. The actual component values
+    # are current_Val=starting_Val*exp(X) where X is the optimizer variable.
 
     # run least-squares, step size is set to 0.1% to make sure
     # that the ltspice sim actually can see a difference when the components are wiggled
@@ -565,7 +570,9 @@ def main():
 
     print('\n*************\n************\nDONE! Generating outputs ...\n***********\n*********\n')
     for k in range(numOptd):
-        print(f'{netlist[OptLine[k]][0]} {X[k] * nomParams[k]:2.12e}')
+        #print(f'{netlist[OptLine[k]][0]} {X[k] * nomParams[k]:2.12e}')
+        print(f'{netlist[OptLine[k]][0]} {nomParams[k] * np.exp(X[k]):2.12e}')
+
     time.sleep(0.1)
     # Re-run simulation with current netlist
     print(f'Issuing command to run post-opt LTspice simulation\n{RunLTstring}')
