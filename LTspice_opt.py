@@ -9,7 +9,7 @@
 ## See any of the example files in this distribution for an example
 ## Change the following line to point to your own setup file.
 
-from example2_setup import simControl, setTarget
+from example1_setup import simControl, setTarget
 
 # notes:
 
@@ -180,7 +180,7 @@ def runSim(LTspice_outputfile, RunLTstring) :
 # **********************************************************
 # reads in the original schematic and replaces the instance values
 # with the optimized insatnce values
-def update_schematic(pass2schem, simctrl):
+def update_schematic(pass2schem, simControlDict):
 
     numOptd = pass2schem['numOptdD']
     OptLine = pass2schem['OptLineD']
@@ -189,8 +189,8 @@ def update_schematic(pass2schem, simctrl):
     filePath = pass2schem['filePathD']
     fileName = pass2schem['fileNameD']
     X = pass2schem['XD']
-    simctrlInstTol = simctrl[6]
-    simctrlOptInstNames = simctrl[3]
+    simctrlInstTol = simControlDict['simControlInstTolD']
+    simctrlOptInstNames = simControlDict['simControlOPtInstNamesD']
 
     # Read in schematic to update
     schem_fname = os.path.join(filePath, fileName + '.asc')
@@ -353,18 +353,31 @@ def round63(X, ser, rnd=None):
 def main():
 
     passCellDict = {}
-    simControlData = simControl()  # Read simulation control input file, filled out by user
+    simControlDict = {}
+    simControlDict = simControl()  # Read simulation control input file, filled out by user
 
-    fileName = simControlData[0]
-    spicePath = simControlData[1]
-    filePath = simControlData[2]
-    simControlOPtInstName = simControlData[3]
-    simControlMinVals = simControlData[4]
-    simControlMaxVals = simControlData[5]
-    simControlInstTol = simControlData[6]
-    simControlOPtInstNames = simControlData[3]
-    LTspice_output_node = simControlData[7]
-    matchMode = simControlData[8]  # 1 = ampl only, 2 = phase only, 3 = both
+    fileName = simControlDict['fileNameD']
+    spicePath = simControlDict['spicePathD']
+    filePath = simControlDict['filePathD']
+    simControlOPtInstNames = simControlDict['simControlOPtInstNamesD']
+    simControlMinVals = simControlDict['simControlMinValsD']
+    simControlMaxVals = simControlDict['simControlMaxValsD']
+    simControlInstTol= simControlDict['simControlInstTolD']
+    LTspice_output_node = simControlDict['LTSPice_output_nodeD']
+    matchMode = simControlDict['matchModeD']
+
+
+
+    # fileName = simControlData[0]
+    # spicePath = simControlData[1]
+    # filePath = simControlData[2]
+    # simControlOPtInstName = simControlData[3]
+    # simControlMinVals = simControlData[4]
+    # simControlMaxVals = simControlData[5]
+    # simControlInstTol = simControlData[6]
+    # simControlOPtInstNames = simControlData[3]
+    # LTspice_output_node = simControlData[7]
+    # matchMode = simControlData[8]  # 1 = ampl only, 2 = phase only, 3 = both
 
     # Derived file paths and run scripts
     netlist_fname = f'{filePath}{fileName}.net'  # Netlist filename
@@ -477,7 +490,7 @@ def main():
     # to the line number in the netlist of those components
     # this makes the least-squares evaluation function faster because it doesn't
     # need to search through the entire netlist each time
-    numOptd = len(simControlOPtInstName)  # Number of instances being optimized
+    numOptd = len(simControlOPtInstNames)  # Number of instances being optimized
     OptLine = [0] * numOptd  # An array that points to the netlist lines with the instance names to be optimized
 
 
@@ -491,7 +504,7 @@ def main():
         thisLine = netlist[k]
 
         for kk in range(numOptd):
-            if simControlOPtInstName[kk] in thisLine[0]:
+            if simControlOPtInstNames[kk] in thisLine[0]:
                 OptLine[kkk - 1] = k
                 UB[kkk - 1] = float(simControlMaxVals[kk])  # Upper bound to pass to optimizer
                 LB[kkk - 1] = float(simControlMinVals[kk])  # Lower bound to pass to optimizer
@@ -628,7 +641,7 @@ def main():
     # I suggest you take the worst-tolerance components and remove them from the
     # list of instances to be optimized, and then re-run the optimizer based on the
     # new '_opt' schematic. 
-    update_schematic(passCellDict, simControlData)  # Write a new _opt schematic (Quantization applied on write-out)
+    update_schematic(passCellDict, simControlDict)  # Write a new _opt schematic (Quantization applied on write-out)
     time.sleep(0.1)
     print(f'\n\nNew schematic with optimum component values generated\nFilename = {filePath}{fileName}_opt.asc\n\n')
 

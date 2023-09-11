@@ -68,9 +68,17 @@ def simControl():
     # 3 = amplitude and phase both
 
     matchMode = 1
+
+# return a dict
+    simControlDict = {}
+    simControlDict['fileNameD'] = fileName
+    simControlDict['spicePathD'] = spicePath
+    simControlDict['filePathD'] = filePath
+    simControlDict['simControlOPtInstNamesD'] = simControlOPtInstNames
+    simControlDict['simControlMinValsD'] = simControlMinVals
+    simControlDict['simControlMaxValsD'] = simControlMaxVals
+    simControlDict['simControlInstTolD'] = simControlInstTol
+    simControlDict['LTSPice_output_nodeD'] = LTSPice_output_node
+    simControlDict['matchModeD'] = matchMode
     
-    simControl = [fileName, spicePath, filePath, simControlOPtInstNames,
-                  simControlMinVals, simControlMaxVals, simControlInstTol,
-                  LTSPice_output_node, matchMode]
-    
-    return simControl
+    return simControlDict

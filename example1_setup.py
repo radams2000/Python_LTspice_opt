@@ -103,7 +103,7 @@ def simControl():
  
     simControlOPtInstNames = ['R2', 'R4', 'C1', 'C2', 'C3'] # component inst names that are allowed to be changed
     simControlMinVals = [100, 100, 1e-12, 1e-12, 1e-12] # Min values of the above components
-    simControlMaxVals = [1e5, 2.5e3, 1e-6, 1e-6, 1e-6] # max values of the above components
+    simControlMaxVals = [10e3, 2.5e3, 1e-6, 1e-6, 1e-6] # max values of the above components
     simControlInstTol = ['E96', 'E96', 'E24', 'E24', 'E24'] # tolerance of the above components
     LTSPice_output_node = 'V(vout)' # LTspice output simulation variable
    
@@ -113,9 +113,17 @@ def simControl():
     # 3 = amplitude and phase both
 
     matchMode = 1 # ampl only
+
+    # return a dict
+    simControlDict = {}
+    simControlDict['fileNameD'] = fileName
+    simControlDict['spicePathD'] = spicePath
+    simControlDict['filePathD'] = filePath
+    simControlDict['simControlOPtInstNamesD'] = simControlOPtInstNames
+    simControlDict['simControlMinValsD'] = simControlMinVals
+    simControlDict['simControlMaxValsD'] = simControlMaxVals
+    simControlDict['simControlInstTolD'] = simControlInstTol
+    simControlDict['LTSPice_output_nodeD'] = LTSPice_output_node
+    simControlDict['matchModeD'] = matchMode
     
-    simControl = [fileName, spicePath, filePath, simControlOPtInstNames,
-                  simControlMinVals, simControlMaxVals, simControlInstTol,
-                  LTSPice_output_node, matchMode]
-    
-    return simControl
+    return simControlDict
