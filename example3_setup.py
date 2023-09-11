@@ -33,7 +33,7 @@ def simControl():
 
 
 
-def setTarget(pass_cell, freqx, match_mode):
+def setTarget(freqx, match_mode):
     # User-defined target response. The user-defined response must be calculated
     # at the same frequencies used in the LTSpice sim
     # freqx = freqs returned by initial LTSpice simulation
@@ -52,12 +52,7 @@ def setTarget(pass_cell, freqx, match_mode):
         target = np.ones(len(freqx))
         err_weights = np.ones(len(freqx))
 
-    
-    
 
-    
-
- 
     X = np.linspace(0, 80000, 21)  # every 4KHz from datasheet plot
     VdB = [0, 0.5, 1, 1.5, 2, 3, 4.8, 7, 11, 17, 22, 13, 8, 5, 6, 4.5, 3, 2.5, 3, 3, 4.5]  # from datasheet plot, freq resp in dB
     mic_dB = np.interp(freqx, X, VdB)
@@ -69,7 +64,7 @@ def setTarget(pass_cell, freqx, match_mode):
     plt.xlabel('Frequency (Hz)')
     plt.ylabel('Gain (dB)')
     plt.grid(True)
-    plt.show(block=False)
+    #(block=False)
 
     mic_lin = 10**(mic_dB / 20)
 
@@ -79,7 +74,7 @@ def setTarget(pass_cell, freqx, match_mode):
     plt.xlabel('Frequency (Hz)')
     plt.ylabel('Gain')
     plt.grid(True)
-    plt.show(block=False)
+    #plt.show(block=False)
 
     target = 30.0 / mic_lin
 
@@ -92,7 +87,7 @@ def setTarget(pass_cell, freqx, match_mode):
     plt.xlabel('Frequency (Hz)')
     plt.ylabel('Gain')
     plt.grid(True)
-    plt.show(block=False)
+    #plt.show(block=False)
 
 
     # plot the target response and error weighting function
@@ -108,8 +103,8 @@ def setTarget(pass_cell, freqx, match_mode):
     plt.title('errWeights')
 
     plt.tight_layout()
-    plt.show(block=False)
-    plt.pause(0.1)
+    #(block=False)
+
 
 
 

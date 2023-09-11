@@ -5,7 +5,7 @@ from scipy.signal import cheby1, freqs
 
 # set the target frequency response and error weights
 
-def setTarget(pass_cell, freqx, match_mode):
+def setTarget(freqx, match_mode):
     target = np.ones(len(freqx))
     err_weights = np.ones(len(freqx))
     f1i = np.where(freqx > 210e3)[0][0]  # edge of passband
@@ -39,8 +39,8 @@ def setTarget(pass_cell, freqx, match_mode):
     plt.title('errWeights')
 
     plt.tight_layout()
-    plt.show(block=False)
-    plt.pause(0.1)
+    #plt.show(block=False)
+
         
     return target, err_weights
 
@@ -54,7 +54,7 @@ def simControl():
     fileName = 'example2'  # name of the LTSpice schematic you want to optimize (without the .asc)
 
     
-    # Cell arrays to define which components will be adjusted
+    # Lists to define which components will be adjusted
     
     simControlOPtInstNames = ['R3', 'R2', 'R4', 'C1', 'C2', 'C3', 'L1', 'C4'] # inst names that will be adjusted
     simControlMinVals = [1000, 100, 1000, 1e-12, 1e-12, 30e-12, 1e-5, 1e-12] # min values of the instances above

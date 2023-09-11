@@ -5,7 +5,7 @@ from scipy.signal import cheby1, freqs
 
 
 
-def setTarget(pass_cell, freqx, match_mode):
+def setTarget(freqx, match_mode):
     # User-defined target response. The user-defined response must be calculated
     # at the same frequencies used in the LTSpice sim
     # freqx = freqs returned by initial LTSpice simulation
@@ -66,15 +66,15 @@ def setTarget(pass_cell, freqx, match_mode):
     # *** plot the target ****
     if match_mode == 1: # ampl only
         plt.figure()
-        plt.semilogx(freqx, 20 * np.log10(target_ampl))
+        plt.semilogx(freqx, 20 * np.log10(target))
         plt.title('chebychev target ampl dB')
-        plt.show(block=False)
+
 
     elif match_mode == 2: # phase only
         plt.figure()
         plt.semilogx(freqx, target_phase)
         plt.title('chebychev target phase')
-        plt.show(block=False)
+
 
     elif match_mode == 3:  # Match both ampl and phase
         plt.figure()
@@ -87,7 +87,7 @@ def setTarget(pass_cell, freqx, match_mode):
         plt.title('chebychev target phase radians')
         
         plt.tight_layout()
-        plt.show(block=False)
+
 
     return target, err_weights
 
@@ -99,7 +99,7 @@ def simControl():
   
     fileName = 'example1'  # name of the LTSpice schematic you want to optimize (without the .asc)
 
-    # Cell arrays filled out by the user
+    # Lists to be filled out by the user
  
     simControlOPtInstNames = ['R2', 'R4', 'C1', 'C2', 'C3'] # component inst names that are allowed to be changed
     simControlMinVals = [100, 100, 1e-12, 1e-12, 1e-12] # Min values of the above components
