@@ -89,6 +89,7 @@ def optLTspice(optParams, *args, **kwargs): # this is the evaluation function ca
         netlist[OptLine[k]][3] = f'{nomParams[k]*np.exp(optParams[k]):.12e}'
 
     print('\ncurrent component values')
+
     for k in range(numOptd):
         #print(f'{netlist[OptLine[k]][0]} {optParams[k] * nomParams[k]:.12e}')
         print(f'{netlist[OptLine[k]][0]} {nomParams[k] * np.exp(optParams[k]):.12e}')
@@ -366,19 +367,6 @@ def main():
     LTspice_output_node = simControlDict['LTSPice_output_nodeD']
     matchMode = simControlDict['matchModeD']
 
-
-
-    # fileName = simControlData[0]
-    # spicePath = simControlData[1]
-    # filePath = simControlData[2]
-    # simControlOPtInstName = simControlData[3]
-    # simControlMinVals = simControlData[4]
-    # simControlMaxVals = simControlData[5]
-    # simControlInstTol = simControlData[6]
-    # simControlOPtInstNames = simControlData[3]
-    # LTspice_output_node = simControlData[7]
-    # matchMode = simControlData[8]  # 1 = ampl only, 2 = phase only, 3 = both
-
     # Derived file paths and run scripts
     netlist_fname = f'{filePath}{fileName}.net'  # Netlist filename
     LTspice_outputfile = f'{filePath}{fileName}.raw'  # sim results filename
@@ -394,84 +382,13 @@ def main():
     passCellDict['LTspice_output_nodeD'] = LTspice_output_node
     passCellDict['matchModeD'] = matchMode
 
+
     # Send command to write netlist
     string = f'start "LTspice" "{spicePath}" -netlist "{filePath}{fileName}.asc"'
     print(f'Issuing command to write LTspice netlist\n{string}')
     status = subprocess.call(string, shell=True)
     time.sleep(0.2) # in theory, subprocess.call is 'blocking', but it doesn't always work, so...
 
-    # Run initial simulation to get frequencies
-    print(f'Issuing command to run initial LTspice simulation\n{RunLTstring}')
-
-    runSim(LTspice_outputfile,RunLTstring)
-    
-    # read the .raw sim results
-    LTR = RawRead(LTspice_outputfile)
-    outNode = LTR.get_trace(LTspice_output_node)
-    fresp = np.abs(outNode)
-    if matchMode == 2 or matchMode == 3: # only compute phase if you are going to use it
-        phase = np.unwrap(np.angle(outNode))
-    freqx = LTR.get_trace('frequency')
-    freqx = np.abs(freqx)
-    numFreqs = len(freqx)
-
- 
-    # now that we have the freqs from the initial sim, we can get
-    # the target response from the user-defined setup file
-
-    [target,errWeights] = setTarget(freqx, matchMode)
-
-    passCellDict['targetD'] = target
-    passCellDict['errWeightsD'] = errWeights
-    if matchMode==3: # target is concatenation of ampl and phase, seperate out for plotting
-        target_fresp = target[0:numFreqs]
-        errWeights_fresp = errWeights[0:numFreqs]
-        target_phase = target[numFreqs:]
-        errWeights_phase = errWeights[numFreqs:]
-
-    # plot the results of the initial sim on top of the target response, as well as the error weeights
-    if matchMode == 1:  # Ampl only match
-        fig, axs = plt.subplots(2)
-        axs[0].semilogx(freqx, 20 * np.log10(fresp),label='init sim')
-        axs[0].semilogx(freqx,20 * np.log10(target),label='target')
-        axs[0].legend()
-        axs[0].set_ylabel('dB')
-        axs[1].semilogx(freqx,errWeights,label='error weights')
-        axs[1].legend()
-
-
-        
-        
-    if matchMode == 2:  # Phase only match
-        fig, axs = plt.subplots(2)
-        axs[0].semilogx(freqx, phase,label='init sim phase')
-        axs[0].semilogx(freqx,target,label='target phase')
-        axs[0].legend()
-        axs[0].set_ylabel('radians')
-        axs[1].semilogx(freqx,errWeights,label='error weights')
-        axs[1].legend()
-
-        
-        
-    if matchMode == 3:  # Both phase and ampl match
-        fig, axs = plt.subplots(2)
-        axs[0].semilogx(freqx, 20 * np.log10(fresp),label='init sim fresp')
-        axs[0].semilogx(freqx,20 * np.log10(target_fresp),label='target fresp')
-        axs[0].legend()
-        axs[0].set_ylabel('dB')
-        axs[1].semilogx(freqx,errWeights_fresp,label='error weights for ampl')
-        axs[1].legend()
-
-        fig, axs = plt.subplots(2)
-        axs[0].semilogx(freqx, phase,label='init sim phase')
-        axs[0].semilogx(freqx,target_phase,label='target phase')
-        axs[0].legend()
-        axs[0].set_ylabel('radians')
-        axs[1].semilogx(freqx,errWeights_phase,label='error weights for phase')
-        axs[1].legend()
-
-       
-        
 
     # Read in the initial netlist. This will be held in memory and modified for every
     # pass through the least-squares. Inside the least-squares function
@@ -521,8 +438,7 @@ def main():
 
     passCellDict['numOptdD'] = numOptd
     passCellDict['OptLineD'] = OptLine
-
-    nomParams = [0.0] * numOptd 
+    nomParams = [0.0] * numOptd
     # This holds the nominal values, initialized to schematic values
 
     for k in range(numOptd):
@@ -553,6 +469,97 @@ def main():
         nomParams[k] = float(newStr)  # Convert the modified value to float
 
     passCellDict['nomParamsD'] = nomParams
+
+    print('\n*** setup file info, please check ***\n')
+    print('inst name, init value, Min, Max, Tolerance ***\n')
+    for k in range(numOptd):
+        print(f'{netlist[OptLine[k]][0]} {nomParams[k]:.12e} {simControlMinVals[k]} {simControlMaxVals[k]} {simControlInstTol[k]}')
+
+    print('\nLTspice output node from setup file = ',LTspice_output_node,'\n')
+    print('LTspice run command = ',RunLTstring,'\n')
+    if matchMode == 1:
+        print('Match mode = Amplitude Only\n')
+    if matchMode == 2:
+        print('Match mode = Phase Only\n')
+    if matchMode == 3:
+        print('Match mode = Amplitude + Phase\n')
+
+
+
+    x = input('Check accuracy above, enter C to continue or any other key to exit ')
+    if x.lower() != 'c':
+        sys.exit()
+
+
+    # Run initial simulation to get frequencies
+    print(f'Issuing command to run initial LTspice simulation\n{RunLTstring}')
+
+    runSim(LTspice_outputfile,RunLTstring)
+    
+    # read the .raw sim results
+    LTR = RawRead(LTspice_outputfile)
+    outNode = LTR.get_trace(LTspice_output_node)
+    fresp = np.abs(outNode)
+    if matchMode == 2 or matchMode == 3: # only compute phase if you are going to use it
+        phase = np.unwrap(np.angle(outNode))
+    freqx = LTR.get_trace('frequency')
+    freqx = np.abs(freqx)
+    numFreqs = len(freqx)
+
+ 
+    # now that we have the freqs from the initial sim, we can get
+    # the target response from the user-defined setup file
+
+    [target,errWeights] = setTarget(freqx, matchMode)
+
+    passCellDict['targetD'] = target
+    passCellDict['errWeightsD'] = errWeights
+    if matchMode==3: # target is concatenation of ampl and phase, seperate out for plotting
+        target_fresp = target[0:numFreqs]
+        errWeights_fresp = errWeights[0:numFreqs]
+        target_phase = target[numFreqs:]
+        errWeights_phase = errWeights[numFreqs:]
+
+    # plot the results of the initial sim on top of the target response, as well as the error weights
+
+    if matchMode == 1:  # Ampl only match
+        fig, axs = plt.subplots(2)
+        axs[0].semilogx(freqx, 20 * np.log10(fresp),label='init sim')
+        axs[0].semilogx(freqx,20 * np.log10(target),label='target')
+        axs[0].legend()
+        axs[0].set_ylabel('dB')
+        axs[1].semilogx(freqx,errWeights,label='error weights')
+        axs[1].legend()
+        fig.canvas.draw_idle()
+        fig.canvas.flush_events()
+
+    if matchMode == 2:  # Phase only match
+        fig, axs = plt.subplots(2)
+        axs[0].semilogx(freqx, phase,label='init sim phase')
+        axs[0].semilogx(freqx,target,label='target phase')
+        axs[0].legend()
+        axs[0].set_ylabel('radians')
+        axs[1].semilogx(freqx,errWeights,label='error weights')
+        axs[1].legend()
+        fig.canvas.draw_idle()
+        fig.canvas.flush_events()
+
+    if matchMode == 3:  # Both phase and ampl match
+        fig, axs = plt.subplots(2)
+        axs[0].semilogx(freqx, 20 * np.log10(fresp),label='init sim fresp')
+        axs[0].semilogx(freqx,20 * np.log10(target_fresp),label='target fresp')
+        axs[0].legend()
+        axs[0].set_ylabel('dB')
+        axs[1].semilogx(freqx,errWeights_fresp,label='error weights for ampl')
+        axs[1].legend()
+        fig.canvas.draw_idle()
+        fig.canvas.flush_events()
+
+
+    x = input('Check initial sim and target plots, enter C to continue or any other key to exit ')
+    if x.lower() != 'c':
+        sys.exit()
+        
 
 
 
@@ -601,37 +608,50 @@ def main():
 
     # plot opt results before schematic generation/component quantization
     if matchMode == 1:
-        plt.figure()
-        plt.semilogx(freqx, 20 * np.log10(target), 'g',label='target')
-        plt.semilogx(freqx, 20 * np.log10(fresp_opt), 'r',label='opt')
+        fig, ax = plt.subplots()
+        #plt.figure()
+        ax.semilogx(freqx, 20 * np.log10(target), 'g',label='target')
+        ax.semilogx(freqx, 20 * np.log10(fresp_opt), 'r',label='opt')
+        fig.canvas.draw()
+        fig.canvas.flush_events()
         plt.title('Ampl Response Opt results vs target ')
         plt.legend()
         plt.ylabel("dB")
+        plt.xlabel("freq")
+        fig.canvas.draw()
+        fig.canvas.flush_events()
+
 
 
     if matchMode == 2:  # Phase only
-        plt.figure()
-        plt.semilogx(freqx, target, 'g',label='target')
-        plt.semilogx(freqx, phase_opt, 'r',label='opt')
+        fig, ax = plt.subplots()
+        ax.semilogx(freqx, target, 'g',label='target')
+        ax.semilogx(freqx, phase_opt, 'r',label='opt')
         plt.title('Phase Opt results vs target')
         plt.legend()
         plt.ylabel("radians")
+        fig.canvas.draw()
+        fig.canvas.flush_events()
 
 
     if matchMode == 3:  # Phase and ampl
-        plt.figure()
-        plt.semilogx(freqx, 20 * np.log10(target_fresp), 'g',label='target')
-        plt.semilogx(freqx, 20 * np.log10(fresp_opt), 'r',label='opt')
+        fig, ax = plt.subplots()
+        ax.semilogx(freqx, 20 * np.log10(target_fresp), 'g',label='target')
+        ax.semilogx(freqx, 20 * np.log10(fresp_opt), 'r',label='opt')
         plt.title('Ampl Response Opt results vs target')
         plt.legend()
         plt.ylabel("dB")
+        fig.canvas.draw()
+        fig.canvas.flush_events()
 
-        plt.figure()
-        plt.semilogx(freqx, target_phase, 'g',label='target')
-        plt.semilogx(freqx, phase_opt, 'r',label='opt')
+        fig, ax = plt.subplots()
+        ax.semilogx(freqx, target_phase, 'g',label='target')
+        ax.semilogx(freqx, phase_opt, 'r',label='opt')
         plt.title('Phase Opt results vs target')
         plt.legend()
         plt.ylabel("radians")
+        fig.canvas.draw()
+        fig.canvas.flush_events()
 
     
 
@@ -671,49 +691,52 @@ def main():
 
     # Plot the target, optimized, and quantized (from new schem) optimized responses
     if matchMode == 1:
-        plt.figure()
-        plt.semilogx(freqx, 20 * np.log10(target), 'g',label='target')
-        plt.semilogx(freqx, 20 * np.log10(fresp_opt), 'r',label='opt')
-        plt.semilogx(freqx, 20 * np.log10(fresp_opt_quant), 'b',label='opt quant')
+        fig, ax = plt.subplots()
+        ax.semilogx(freqx, 20 * np.log10(target), 'g',label='target')
+        ax.semilogx(freqx, 20 * np.log10(fresp_opt), 'r',label='opt')
+        ax.semilogx(freqx, 20 * np.log10(fresp_opt_quant), 'b',label='opt quant')
         plt.title('Ampl Resp Opt results from sim of new schematic')
         plt.legend()
         plt.ylabel("dB")
+        fig.canvas.draw()
+        fig.canvas.flush_events()
 
 
     if matchMode == 2:  # Phase only
-        plt.figure()
-        plt.semilogx(freqx, target, 'g',label='target')
-        plt.semilogx(freqx, phase_opt, 'r',label='opt')
-        plt.semilogx(freqx, phase_opt_quant, 'b',label='opt quant')
+        fig, ax = plt.subplots()
+        ax.semilogx(freqx, target, 'g',label='target')
+        ax.semilogx(freqx, phase_opt, 'r',label='opt')
+        ax.semilogx(freqx, phase_opt_quant, 'b',label='opt quant')
         plt.title('Phase Opt results from sim of new schematic')
         plt.legend()
         plt.ylabel("radians")
+        fig.canvas.draw()
+        fig.canvas.flush_events()
 
 
     if matchMode == 3:  # Phase and ampl
-        plt.figure()
-        plt.semilogx(freqx, 20 * np.log10(target_fresp), 'g',label='target')
-        plt.semilogx(freqx, 20 * np.log10(fresp_opt), 'r',label='opt')
-        plt.semilogx(freqx, 20 * np.log10(fresp_opt_quant), 'b',label='opt quant')
+        fig, ax = plt.subplots()
+        ax.semilogx(freqx, 20 * np.log10(target_fresp), 'g',label='target')
+        ax.semilogx(freqx, 20 * np.log10(fresp_opt), 'r',label='opt')
+        ax.semilogx(freqx, 20 * np.log10(fresp_opt_quant), 'b',label='opt quant')
         plt.title('Ampl Resp Quantized Opt results from sim of new schematic')
         plt.legend()
         plt.ylabel("dB")
+        fig.canvas.draw()
+        fig.canvas.flush_events()
 
-        plt.figure()
-        plt.semilogx(freqx, target_phase, 'g')
-        plt.semilogx(freqx, phase_opt, 'r')
-        plt.semilogx(freqx, phase_opt_quant, 'b')
+        fig, ax = plt.subplots()
+        ax.semilogx(freqx, target_phase, 'g')
+        ax.semilogx(freqx, phase_opt, 'r')
+        ax.semilogx(freqx, phase_opt_quant, 'b')
         plt.title('Phase Resp Quantized Opt results from sim of new schematic')
         plt.legend(['target', 'opt', 'opt quant'])
         plt.ylabel("radians")
+        fig.canvas.draw()
+        fig.canvas.flush_events()
 
     print('\n*******\n***** DONE! ******\n*******')
-    print('\n\n****** exit all plots to exit program ***\n')
-    plt.show(block=True)
-
-    # user will need to close all plots to exit program
-
-    #sys.exit()
+    sys.exit()
 
 if __name__ == "__main__":
     main()

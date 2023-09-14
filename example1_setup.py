@@ -4,6 +4,44 @@ import time
 from scipy.signal import cheby1, freqs
 
 
+def simControl():
+
+    # ******************************** USER INPUT SECTION *****************
+    # user-supplied file paths
+    spicePath = r'C:\\Program Files\\LTC\\LTspiceXVII\\XVIIx64.exe'  # This is the path to your LT Spice installation
+    filePath = r'C:\\Users\\radam\\Documents\\LTspiceXVII\\'  # This is the path to the working LTSPICE folder (schems, netlists, simulation output files)
+
+    fileName = 'example1'  # name of the LTSpice schematic you want to optimize (without the .asc)
+
+    # Lists to be filled out by the user
+
+    simControlOPtInstNames = ['R2', 'R4', 'C1', 'C2', 'C3']  # component inst names that are allowed to be changed
+    simControlMinVals = [100, 100, 1e-12, 1e-12, 1e-12]  # Min values of the above components
+    simControlMaxVals = [10e3, 2.5e3, 1e-6, 1e-6, 1e-6]  # max values of the above components
+    simControlInstTol = ['E96', 'E96', 'E24', 'E24', 'E24']  # tolerance of the above components
+    LTSPice_output_node = 'V(vout)'  # LTspice output simulation variable
+
+    # Set the match mode.
+    # 1 = amplitude only
+    # 2 = phase only
+    # 3 = amplitude and phase both
+    matchMode = 1  # ampl only
+
+    # *******************************************************************************************
+
+    # return a dict
+    simControlDict = {}
+    simControlDict['fileNameD'] = fileName
+    simControlDict['spicePathD'] = spicePath
+    simControlDict['filePathD'] = filePath
+    simControlDict['simControlOPtInstNamesD'] = simControlOPtInstNames
+    simControlDict['simControlMinValsD'] = simControlMinVals
+    simControlDict['simControlMaxValsD'] = simControlMaxVals
+    simControlDict['simControlInstTolD'] = simControlInstTol
+    simControlDict['LTSPice_output_nodeD'] = LTSPice_output_node
+    simControlDict['matchModeD'] = matchMode
+
+    return simControlDict
 
 def setTarget(freqx, match_mode):
     # User-defined target response. The user-defined response must be calculated
@@ -64,66 +102,46 @@ def setTarget(freqx, match_mode):
         ret_cell = [target, err_weights]  # Return concatenated target and err_weights
 
     # *** plot the target ****
+    plt.ion()
     if match_mode == 1: # ampl only
-        plt.figure()
-        plt.semilogx(freqx, 20 * np.log10(target))
-        plt.title('chebychev target ampl dB')
+
+        fig, ax = plt.subplots()
+        ax.semilogx(freqx, 20 * np.log10(target))
+        plt.title('chebychev target ampl')
+        ax.set_ylabel('dB')
+        ax.set_xlabel('freq')
+        fig.canvas.draw()
+        fig.canvas.flush_events()
+
 
 
     elif match_mode == 2: # phase only
-        plt.figure()
-        plt.semilogx(freqx, target_phase)
+        fig, ax = plt.subplots()
+        ax.semilogx(freqx, target_phase)
         plt.title('chebychev target phase')
+        ax.set_ylabel('radians')
+        ax.set_xlabel('freq')
+        fig.canvas.draw()
+        fig.canvas.flush_events()
 
 
     elif match_mode == 3:  # Match both ampl and phase
-        plt.figure()
+        fig, ax = plt.subplots(2)
         plt.subplot(2, 1, 1)
-        plt.semilogx(freqx, 20 * np.log10(target_ampl))
-        plt.title('chebychev target ampl dB')
+        ax[0].semilogx(freqx, 20 * np.log10(target_ampl))
+        ax[0].set_ylabel('dB')
+        ax[0].set_xlabel('freq')
         
-        plt.subplot(2, 1, 2)
-        plt.semilogx(freqx, target_phase)
-        plt.title('chebychev target phase radians')
+        ax[1].semilogx(freqx, target_phase)
+        ax[1].set_ylabel('radians')
+        ax[1].set_xlabel('freq')
+        plt.title('chebychev target ampl(dB) + phase(radians)')
         
         plt.tight_layout()
+        fig.canvas.draw()
+        fig.canvas.flush_events()
 
 
     return target, err_weights
 
 
-def simControl():
-    # user-supplied file paths
-    spicePath = r'C:\\Program Files\\LTC\\LTspiceXVII\\XVIIx64.exe'  # This is the path to your LT Spice installation
-    filePath = r'C:\\Users\\radam\\Documents\\LTspiceXVII\\'  # This is the path to the working LTSPICE folder (schems, netlists, simulation output files)
-  
-    fileName = 'example1'  # name of the LTSpice schematic you want to optimize (without the .asc)
-
-    # Lists to be filled out by the user
- 
-    simControlOPtInstNames = ['R2', 'R4', 'C1', 'C2', 'C3'] # component inst names that are allowed to be changed
-    simControlMinVals = [100, 100, 1e-12, 1e-12, 1e-12] # Min values of the above components
-    simControlMaxVals = [10e3, 2.5e3, 1e-6, 1e-6, 1e-6] # max values of the above components
-    simControlInstTol = ['E96', 'E96', 'E24', 'E24', 'E24'] # tolerance of the above components
-    LTSPice_output_node = 'V(vout)' # LTspice output simulation variable
-   
-    # Set the match mode.
-    # 1 = amplitude only
-    # 2 = phase only
-    # 3 = amplitude and phase both
-
-    matchMode = 1 # ampl only
-
-    # return a dict
-    simControlDict = {}
-    simControlDict['fileNameD'] = fileName
-    simControlDict['spicePathD'] = spicePath
-    simControlDict['filePathD'] = filePath
-    simControlDict['simControlOPtInstNamesD'] = simControlOPtInstNames
-    simControlDict['simControlMinValsD'] = simControlMinVals
-    simControlDict['simControlMaxValsD'] = simControlMaxVals
-    simControlDict['simControlInstTolD'] = simControlInstTol
-    simControlDict['LTSPice_output_nodeD'] = LTSPice_output_node
-    simControlDict['matchModeD'] = matchMode
-    
-    return simControlDict
