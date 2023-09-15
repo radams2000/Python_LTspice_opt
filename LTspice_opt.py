@@ -416,12 +416,11 @@ def main():
     UB = [0.0] * numOptd  # Initialize the upper bound array
     LB = [0.0] * numOptd  # Initialize the lower bound array
 
-    for k in range(numlines_netlist):  # Go through lines
-        N = len(netlist[k])
-        thisLine = netlist[k]
-
-        for kk in range(numOptd):
+    for kk in range(numOptd):  # search all opt instance names to see if they are on the kth netlist line
+        for k in range(numlines_netlist):  # Go through all netlist lines to look for this instance
+            thisLine = netlist[k]
             if simControlOPtInstNames[kk] in thisLine[0]:
+                #print('found ',simControlOPtInstNames[kk], 'in line ', k, 'with kk= ',kk)
                 OptLine[kkk - 1] = k
                 UB[kkk - 1] = float(simControlMaxVals[kk])  # Upper bound to pass to optimizer
                 LB[kkk - 1] = float(simControlMinVals[kk])  # Lower bound to pass to optimizer
@@ -473,7 +472,7 @@ def main():
     print('\n*** setup file info, please check ***\n')
     print('inst name, init value, Min, Max, Tolerance ***\n')
     for k in range(numOptd):
-        print(f'{netlist[OptLine[k]][0]} {nomParams[k]:.12e} {simControlMinVals[k]} {simControlMaxVals[k]} {simControlInstTol[k]}')
+        print(f'{netlist[OptLine[k]][0]} {nomParams[k]:.12e} {LB[k]} {UB[k]} {simControlInstTol[k]}')
 
     print('\nLTspice output node from setup file = ',LTspice_output_node,'\n')
     print('LTspice run command = ',RunLTstring,'\n')
@@ -581,8 +580,9 @@ def main():
 
     # run least-squares, step size is set to 0.1% to make sure
     # that the ltspice sim actually can see a difference when the components are wiggled
-   
-    X = least_squares(optLTspice, optParams,method = 'trf',bounds=(LB, UB),diff_step=1e-4, kwargs=passCellDict).x  # Optimize using least_squares function
+    #maxEvals = np.floor(700 / numOptd) # max 700 times through the error calc fun
+
+    X = least_squares(optLTspice, optParams,method = 'trf',bounds=(LB, UB),diff_step=1e-5, kwargs=passCellDict).x  # Optimize using least_squares function
 
     passCellDict['XD']=X
 
