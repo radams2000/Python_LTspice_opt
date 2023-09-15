@@ -582,7 +582,7 @@ def main():
     # that the ltspice sim actually can see a difference when the components are wiggled
     #maxEvals = np.floor(700 / numOptd) # max 700 times through the error calc fun
 
-    X = least_squares(optLTspice, optParams,method = 'trf',bounds=(LB, UB),diff_step=1e-5, kwargs=passCellDict).x  # Optimize using least_squares function
+    X = least_squares(optLTspice, optParams,method = 'trf',bounds=(LB, UB),diff_step=1e-5, ftol=1e-5,kwargs=passCellDict).x  # Optimize using least_squares function
 
     passCellDict['XD']=X
 
