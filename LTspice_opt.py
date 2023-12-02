@@ -9,7 +9,7 @@
 ## See any of the example files in this distribution for an example
 ## Change the following line to point to your own setup file.
 
-from example1_setup import simControl, setTarget
+from example2_diff_setup import simControl, setTarget
 
 # notes:
 
