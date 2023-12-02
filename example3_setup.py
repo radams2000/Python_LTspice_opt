@@ -22,8 +22,17 @@ def simControl():
     simControlInstTol = ['E96', 'E24', 'E96'] # 1% R, 5% C
 
     LTSPice_output_node = 'V(vout)'
+
+    # Set the match mode.
+    # 1 = amplitude only
+    # 2 = phase only
+    # 3 = amplitude and phase both
     matchMode = 1
 
+    # max # of iterations in he particle-swarm global optimization phase (enter 0 to skip)
+    maxIter_ps = 20
+    # max # of iterations in the least-squares optimization phase (enter 0 to skip lsq)
+    maxIter_lsq = 70
 
     # return a dict
     simControlDict = {}
@@ -36,6 +45,8 @@ def simControl():
     simControlDict['simControlInstTolD'] = simControlInstTol
     simControlDict['LTSPice_output_nodeD'] = LTSPice_output_node
     simControlDict['matchModeD'] = matchMode
+    simControlDict['maxIter_lsqD'] =  maxIter_lsq
+    simControlDict['maxIter_psD'] = maxIter_ps
     
     return simControlDict
 

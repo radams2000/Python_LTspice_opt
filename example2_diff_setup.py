@@ -1,7 +1,6 @@
 import numpy as np
-
+import matplotlib.pyplot as plt
 from myPlots import myPlot_1x_errweights
-
 
 
 
@@ -13,14 +12,14 @@ def simControl():
     # user-supplied file paths
     spicePath = r'C:\\Program Files\\LTC\\LTspiceXVII\\XVIIx64.exe'  # This is the path to your LT Spice installation
     filePath = r'C:\\Users\\radam\\Documents\\LTspiceXVII\\'  # This is the path to the working LTSPICE folder (schems, netlists, simulation output files)
-    fileName = 'example2'  # name of the LTSpice schematic you want to optimize (without the .asc)
+    fileName = 'example2_diff'  # name of the LTSpice schematic you want to optimize (without the .asc)
 
     # Lists to define which components will be adjusted
     #
-    simControlOPtInstNames = ['R2VAL', 'C1', 'C3VAL', 'C4', 'R1', 'CRATIO']  # inst names that will be adjusted
-    simControlMinVals = [1e3, 300e-12, 50e-12, 200e-12, 300, 1.0]  # min values of the instances above
-    simControlMaxVals = [4e3, 10e-9,  2e-9, 3e-9, 1e3, 3.0]  # max values of the instances above
-    simControlInstTol = ['E96', 'E24', 'E24', 'E24', 'E96', 'E96']  # tolerances of the instances above, 1% R, 5% C and L
+    simControlOPtInstNames = ['C4VAL','R1VAL','R2VAL','R3VAL','C2VAL','C1','C3']  # inst names that will be adjusted
+    simControlMinVals = [300e-12, 100, 300, 300, 200e-12, 200e-12, 50e-12]  # min values of the instances above
+    simControlMaxVals = [3e-9,   300, 5e3,   5e3, 5e-9, 5e-9, 1e-9]  # max values of the instances above
+    simControlInstTol = ['E96', 'E96', 'E96', 'E96', 'E96', 'E96', 'E96']  # tolerances of the instances above
     LTSPice_output_node = 'V(vout)'  # LTspice output variable where freq response is taken from
 
 
@@ -28,14 +27,17 @@ def simControl():
     # 1 = amplitude only
     # 2 = phase only
     # 3 = amplitude and phase both
+
     matchMode = 1
 
-    #  max # of iterations in he particle-swarm global optimization phase (enter 0 to skip)
-    maxIter_ps = 20
-    #  max # of iterations in the least-squares optimization phase (enter 0 to skip lsq)
-    maxIter_lsq = 100
+    maxIter_ps = 20 #  max # of iterations in he particle-swarm global optimization phase (enter 0 to skip)
+    maxIter_lsq = 70    #  max # of iterations in the least-squares optimization phase (enter 0 to skip lsq)
 
 
+
+    # switch to control whether initial schematic values are used in the initial differential evolution population
+    # if set to 0, all the initial values are populated with random vectors that span the [min max] range for each component
+    useInitialGuess_de = 0
 
     # ******************************************************************
 
@@ -53,12 +55,13 @@ def simControl():
     simControlDict['maxIter_lsqD'] =  maxIter_lsq
     simControlDict['maxIter_psD'] = maxIter_ps
 
+
     return simControlDict
 
 
 # set the target frequency response and error weights
 
-def setTarget(freqx, matchMode): # note, matchMode 1 only since it's a passband/stopband style of optimization
+def setTarget(freqx, match_mode):
     target = np.ones(len(freqx))
     err_weights = np.ones(len(freqx))
     f1i = np.where(freqx > 150e3)[0][0]  # edge of passband
@@ -72,18 +75,12 @@ def setTarget(freqx, matchMode): # note, matchMode 1 only since it's a passband/
     err_weights[f1i:f2i] = 0  # don't-care band error weights
     deltai = f1i - f1ai
     rng = np.arange(f1ai, f1i)
-    # err_weights[rng] = 1 + 8 * (rng - f1ai) / deltai
-    err_weights[rng] = 3
-    #  export a json file
-    # headers = ["frequency", "Amplitude", "ErrorWeight"]
-    # exportJson = np.column_stack((freqx,target,err_weights)).tolist()
-    # exportJson.insert(0, headers)
-    # json_file_path = 'target.json'
-    # with open(json_file_path, 'w') as json_file:
-    #     json.dump(exportJson, json_file, indent=2)
+    err_weights[rng] = 1 + 4 * (rng - f1ai) / deltai
 
-    #  plot
-    myPlot_1x_errweights('chebychev target ampl','errWeights','fresp',freqx,target,err_weights,'target ampl',1,'target_ampl+errWeights.pdf')
+
+    # plot the target response and error weighting function
+
+    myPlot_1x_errweights('chebychev target ampl','errWeights','fresp',freqx,target,err_weights,'target ampl',1,'target_ampl+errWeights_ampl.pdf')
 
     return target, err_weights
 

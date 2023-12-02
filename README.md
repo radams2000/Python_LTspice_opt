@@ -9,14 +9,15 @@ Analog Devices Inc.
 
 
 LTSpice_opt is a Python program that uses an iterative optimization approach to design analog filters. 
-It is designed to be used in conjunction with the popular circuit simulator LTspice. It embeds an LTSpice simulation inside the powerful sciPy nonlinear least-squares optimizer.
+It is designed to be used in conjunction with the popular circuit simulator LTspice. It embeds an LTSpice simulation inside the two different optimizers (Particle Swarm and nonlinear least-squares), which are run sequentially.
+
 It works as follows;
 
 1) The user provides a target frequency and/or phase response in Python, and a circuit topology in LTspice with some initial component values.
   
-2) The user provides a list of which circuit instances the optimizer is allowed to vary.
+2) The user provides a list of which circuit instances and/or parameter values the optimizer is allowed to vary.
   
-3) The optimizer then iteratively adjusts those component values, running a simulation for every pass through the least-squares algorithm, in an attempt to reduce the error between the target frequency (and/or phase) response and the simulated response.
+3) The optimizer then iteratively adjusts those component values and/or parameters, using a 2-pass approach. In the first pass, a global search algorithm called "particle swarm" is used to find a solution that is reasonably close to the optimum solution. Since global algorithms are not based on computing gradients, this first pass is more likely to avoid the common problem of converging to a local minimum. This is followed by a non-linear least-squares phase where the component values are fine-tuned to find the minimum distance between the desired target response and the computed response. The complete process may involve hundreds or thousands of spice simulations as the optimizer completes its work. The Python program interfaces to LTspice using command-line control and file I/O.
   
 4) Once the optimizer has finished, a new schematic is generated with the optimized component values. During the schematic generation process, each component value is quantized to a user-defined tolerance.
 
@@ -39,31 +40,7 @@ This leads to non-conventional circuit topologies that have very messy closed-lo
  
 Calculating the effects of finite gain-bandwidth on the frequency response is quite complicated, especially in cases where the gain/phase response deviates from the traditional single-pole model. By running optimizer simulations in LTSpice, the actual target op-amp may be included in the simulation. This yields a solution that inherently attempts to compensate for finite gain-bandwidth effects.
 
-The software may be downloaded using the link here.
 
-[Python_LTspice_opt](https://github.com/radams2000/Python_LTspice_opt/releases/)
-
-
-Download the zip file, and unzip in a directory on your computer. Move all the Python ".py" files to a directory where you will run Python. Move the LTspice ".asc" files to a directory where you will store your schematics. See the README.pdf file for detailed instructions on how to run the Python program, and what other Python packages need to be installed.
-
-The inspiration for this program came from a similar program written more than 40 years ago by Mark Davis, my co-worker at dbx Inc. The original was text-only and ran in a dos window, but was very useful for many audio applications where arbitrary frequency reposnses were required.
-
-
-
-
-License
-LTSpice Optimizer
-Copyright (C) Robert Adams 2023
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
+Download all files. Move all the Python ".py" files to a directory where you will run Python. Move the LTspice ".asc" files to a directory where you will store your schematics. See the README.pdf file for detailed instructions on how to run the Python program, and what other Python packages need to be installed.
 
 

@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 from scipy.signal import cheby1, freqs
+from myPlots import myPlot_1x_errweights
 
 
 def simControl():
@@ -16,9 +17,9 @@ def simControl():
     # Lists to be filled out by the user
 
     simControlOPtInstNames = ['R2', 'R4', 'C1', 'C2', 'C3']  # component inst names that are allowed to be changed
-    simControlMinVals = [100, 100, 1e-12, 1e-12, 1e-12]  # Min values of the above components
-    simControlMaxVals = [10e3, 2.5e3, 1e-6, 1e-6, 1e-6]  # max values of the above components
-    simControlInstTol = ['E96', 'E96', 'E24', 'E24', 'E24']  # tolerance of the above components
+    simControlMinVals = [400, 1.0e3, 50e-9, 20e-9, 300e-12]  # Min values of the above components
+    simControlMaxVals = [4000, 10e3, 400e-9, 160e-9, 2e-9]  # max values of the above components
+    simControlInstTol = ['E12', 'E12', 'E12', 'E12', 'E12']  # tolerance of the above components
     LTSPice_output_node = 'V(vout)'  # LTspice output simulation variable
 
     # Set the match mode.
@@ -26,7 +27,14 @@ def simControl():
     # 2 = phase only
     # 3 = amplitude and phase both
     matchMode = 1  # ampl only
-
+    #  max # of spice sims in the initial differential evolution phase (enter 0 to skip differential evolution)
+    maxSpiceSims_de = 300
+    #  max # of spice sims in the least-squares optimization phase (enter 0 to skip lsq)
+    maxIter_lsq = 60
+    maxIter_ps = 2
+    # switch to control whether initial schematic values are used in the initial differential evolution population
+    # if set to 0, all the initial values are populated with random vectors that span the [min max] range for each component
+    useInitialGuess_de = 1
     # *******************************************************************************************
 
     # return a dict
@@ -40,14 +48,17 @@ def simControl():
     simControlDict['simControlInstTolD'] = simControlInstTol
     simControlDict['LTSPice_output_nodeD'] = LTSPice_output_node
     simControlDict['matchModeD'] = matchMode
+    simControlDict['maxIter_lsqD'] =  maxIter_lsq
+    simControlDict['maxSpiceSims_deD'] = maxSpiceSims_de
+    simControlDict['maxIter_psD'] = maxIter_ps
 
     return simControlDict
 
-def setTarget(freqx, match_mode):
+def setTarget(freqx, matchMode):
     # User-defined target response. The user-defined response must be calculated
     # at the same frequencies used in the LTSpice sim
     # freqx = freqs returned by initial LTSpice simulation
-    # match_mode = 1, 2, or 3 (ampl only, phase only, or both)
+    # matchMode = 1, 2, or 3 (ampl only, phase only, or both)
 
     # Default values for the targets and frequency-dependent weighting functions
     print('found ',len(freqx),' freqs in simulation')
@@ -55,7 +66,7 @@ def setTarget(freqx, match_mode):
     err_weights_phase = np.ones(len(freqx))
     target_ampl = np.ones(len(freqx))
     target_phase = np.ones(len(freqx))
-    if match_mode == 3: # match ampl + phase; return error is concatenation, so need 2X length
+    if matchMode == 3: # match ampl + phase; return error is concatenation, so need 2X length
         target = np.ones(2*len(freqx))
         err_weights = np.ones(2*len(freqx))
     else:
@@ -76,7 +87,7 @@ def setTarget(freqx, match_mode):
     Hampl = Hampl / Hampl[0]  # DC gain = 1
     Hphase = np.unwrap(np.angle(H)) # the phase in radians, in case we want to match phase
 
-    if match_mode == 1:  # Match ampl only, set targets and error weighting function
+    if matchMode == 1:  # Match ampl only, set targets and error weighting function
        
         target_phase = np.ones(len(freqx))  # Not used
         target = Hampl  # This is what is returned by function
@@ -84,7 +95,7 @@ def setTarget(freqx, match_mode):
         err_weights_phase = np.ones(len(freqx))  # Not used
         err_weights = err_weights_ampl  # err_weights is returned by function
 
-    elif match_mode == 2:  # Match phase only, set targets and weighting function
+    elif matchMode == 2:  # Match phase only, set targets and weighting function
         target_ampl = np.ones(len(freqx))  # Not used
         target_phase = Hphase  # Used
         target = target_phase  # Returned by function
@@ -92,7 +103,7 @@ def setTarget(freqx, match_mode):
         err_weights_phase = np.ones(len(freqx))
         err_weights = err_weights_phase  # err_weights is returned by function
 
-    elif match_mode == 3:  # Match both ampl and phase, set targets and weighting function
+    elif matchMode == 3:  # Match both ampl and phase, set targets and weighting function
         target_ampl = Hampl
         target_phase = Hphase
         target = np.concatenate((target_ampl, target_phase))  # Concatenate ampl and phase
@@ -102,45 +113,11 @@ def setTarget(freqx, match_mode):
         ret_cell = [target, err_weights]  # Return concatenated target and err_weights
 
     # *** plot the target ****
-    plt.ion()
-    if match_mode == 1: # ampl only
 
-        fig, ax = plt.subplots()
-        ax.semilogx(freqx, 20 * np.log10(target))
-        plt.title('chebychev target ampl')
-        ax.set_ylabel('dB')
-        ax.set_xlabel('freq')
-        fig.canvas.draw()
-        fig.canvas.flush_events()
-
-
-
-    elif match_mode == 2: # phase only
-        fig, ax = plt.subplots()
-        ax.semilogx(freqx, target_phase)
-        plt.title('chebychev target phase')
-        ax.set_ylabel('radians')
-        ax.set_xlabel('freq')
-        fig.canvas.draw()
-        fig.canvas.flush_events()
-
-
-    elif match_mode == 3:  # Match both ampl and phase
-        fig, ax = plt.subplots(2)
-        plt.subplot(2, 1, 1)
-        ax[0].semilogx(freqx, 20 * np.log10(target_ampl))
-        ax[0].set_ylabel('dB')
-        ax[0].set_xlabel('freq')
-        
-        ax[1].semilogx(freqx, target_phase)
-        ax[1].set_ylabel('radians')
-        ax[1].set_xlabel('freq')
-        plt.title('chebychev target ampl(dB) + phase(radians)')
-        
-        plt.tight_layout()
-        fig.canvas.draw()
-        fig.canvas.flush_events()
-
+    if matchMode == 1 or matchMode == 3: # ampl only or ampl/phase, plot ampl
+        myPlot_1x_errweights('chebychev target ampl','err weights','fresp',freqx,target,err_weights,'target ampl',1,'target_ampl+errWeights.pdf')
+    if matchMode == 2 or matchMode == 3: # phase only or mixed, plot phase
+        myPlot_1x_errweights('chebychev target phase','err weights','phase',freqx,target_phase,err_weights,'target phase',1,'target_phase+errWeights.pdf')
 
     return target, err_weights
 
