@@ -1,0 +1,12 @@
+varInstNames,R2,R3,C1,C2,C3
+varMinVals,2000,2000,10e-9,300e-12,300e-12
+varMaxVals,8000,8000,200E-09,10e-9,10e-9
+instTol,E96,E96,E24,E24,E24
+matchMode,1,,,,
+maxIter_ps,20,,,,
+maxIter_lsq,40,,,,
+spicePath,C:\\Program Files\\LTC\\LTspiceXVII\\XVIIx64.exe,,,,
+filePath,C:\\Users\\radam\\Documents\\LTspiceXVII\\,,,,
+fileName,example1,,,,
+outputVar,V(vout),,,,
+plotXaxis,Log,,,,

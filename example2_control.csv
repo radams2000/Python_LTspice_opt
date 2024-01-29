@@ -1,0 +1,11 @@
+varInstNames,R2VAL,C1,C3VAL,C4,R1,CRATIO
+varMinVals,1.00E+03,3.00E-10,5.00E-11,2.00E-10,300,1
+varMaxVals,8.00E+03,1.00E-08,2.00E-09,3.00E-09,1.00E+03,4
+instTol,E96,E24,E24,E24,E96,E96
+matchMode,1,,,,,
+maxIter_ps,20,,,,,
+maxIter_lsq,40,,,,,
+spicePath,C:\\Program Files\\LTC\\LTspiceXVII\\XVIIx64.exe,,,,,
+filePath,C:\\Users\\radam\\Documents\\LTspiceXVII\\,,,,,
+fileName,example2,,,,,
+outputVar,V(vout),,,,,

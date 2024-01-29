@@ -15,9 +15,8 @@
 
 # from example1_setup import simControl, setTarget
 from example2_setup import simControl, setTarget
-#  from example2_diff_setup import simControl, setTarget
-#  from hilbert_example_setup import simControl, setTarget
-# from testTran_setup import simControl, setTarget
+# from hilbert_example_setup import simControl, setTarget
+#  from testTran_setup import simControl, setTarget
 
 # notes:
 
@@ -45,9 +44,14 @@ import os
 import subprocess
 import time
 import sys
+import csv
+# import re  # regular expressions
+from itertools import chain
 import hashlib
+import logging
 
 from PyLTSpice import RawRead # user must install into env from https://pypi.org/project/PyLTSpice/
+from PyLTSpice import SimRunner
 from scipy.optimize import least_squares
 
 import pyswarms as ps
@@ -55,7 +59,7 @@ from pyswarms.utils.functions import single_obj as fx
 from myPlots import myPlot_1x,myPlot_2x,myPlot_3x,myPlot_2x_errweights,myPlot_1x_errweights
 
 
-print('******\n******\nCopyright (C) Robert Adams 2023\n******\n******')
+print('******\n******\nCopyright (C) Robert Adams 2024\n******\n******')
 
 # LTspice Optimizer
 # Copyright (C) Robert Adams 2023
@@ -77,11 +81,15 @@ print('******\n******\nCopyright (C) Robert Adams 2023\n******\n******')
 
 plt.interactive(True)
 
+
+
 # Initialize global variables
 spiceSimCount_lsq = 0  # spice sim count for the least-squares
 iterationCount_ps = 0  # iteration count for the particle swarm
 
 passCellDict = {}  # empty dict
+
+spiceSimCount = 1  # keeps track of cummulative spice sims so we know which result fle to parse
 
 # ******************************* functions ***************************
 
@@ -89,115 +97,104 @@ passCellDict = {}  # empty dict
 def pswarm(optParams): # this is the evaluation function called particle swarm
     global passCellDict
     global iterationCount_ps
+    global spiceSimCount
+    global restartCount
 
-
-    RunLTstring = passCellDict['RunLTstringD']
     LTspice_outputfile = passCellDict['LTspice_outputfileD']
-    LTspice_output_node = passCellDict['LTspice_output_nodeD']
+    LTspice_output_expr = passCellDict['LTspice_output_exprD']
     matchMode = passCellDict['matchModeD']
     target = passCellDict['targetD']
     errWeights = passCellDict['errWeightsD']
     nomParams = passCellDict['nomParamsD']
     numOptd = passCellDict['numOptdD']
+    LTC = passCellDict['LTC_D']
+    netlist_fname = passCellDict['netlist_fnameD']
+    fileName = passCellDict['fileNameD']
     numParticles = len(optParams)
     rmserrRet = np.zeros(numParticles)
-    # bestRMS = 1e12
+    bestErr = 1e6
+    bestKK = 0
     for kk in range(numParticles):  # this is called with a vector of all particle positions at once
         componentVal = np.zeros(numOptd)
         for k in range(numOptd):
             componentVal[k] = optParams[kk,k] * nomParams[k]  # de-normalize
-            #write_netlist(componentVal,optParams)
         update_netlist(passCellDict,componentVal)
 
-        time.sleep(0.02)
-        runSim(LTspice_outputfile, RunLTstring)  # get result by reading spice output file
-        time.sleep(0.02)
-        LTR = RawRead(LTspice_outputfile)
-        outNode = LTR.get_trace(LTspice_output_node)
-        if matchMode < 4: # freq sweep sim
-            fresp = np.abs(outNode)
-            freqx = LTR.get_trace('frequency')
-            freqx = np.abs(freqx)
-            if matchMode == 2 or matchMode == 3:
-                phase = np.unwrap(np.angle(outNode))
+        # time.sleep(0.02)
 
-            if matchMode == 1:  # ampl only
-                optCurrent = fresp
-            if matchMode == 2:  # phase only
-                optCurrent = phase
-            if matchMode == 3:  # ampl and phase
-                optCurrent = np.concatenate((fresp, phase))
+        LTR = runMySim(LTC, fileName, netlist_fname,False)
 
-            if len(target) != len(optCurrent):
-                print('ERROR, something went wrong with the LTspice sim...')
-                sys.exit()
-        if matchMode == 4: # time-domain transient sim
-            numTimePoints = passCellDict['numTimePointsD']
-            timex = LTR.get_trace('time')
-            timex = np.abs(timex)  ## sometimes the function returns a neg value, but otherwise correct ??
-            timexLinspace = np.linspace(np.min(timex), np.max(timex), numTimePoints)
-            optCurrent = np.interp(timexLinspace, timex, outNode)
+        outNode = LTR.get_trace(LTspice_output_expr)
+        fresp = np.abs(outNode)
+        freqx = LTR.get_trace('frequency')
+        freqx = np.abs(freqx)
+
+        if matchMode == 2:
+            optCurrent = np.unwrap(np.angle(outNode))
+
+        if matchMode == 1:  # ampl only
+            optCurrent = fresp
+
+        # if matchMode == 3:  # ampl and phase
+        #     optCurrent = np.concatenate((fresp, phase))
+
+        if len(target) != len(optCurrent):
+            print('ERROR, something went wrong with the LTspice sim...')
+            sys.exit()
 
         err = target - optCurrent  # error between target and current response
 
         err = err * errWeights  # apply frequency-dependent optimization
         rmsErr = np.sqrt(np.mean(err ** 2))
+        if rmsErr < bestErr:
+            bestErr = rmsErr
+            bestKK = kk
         rmserrRet[kk] = rmsErr
-        # if rmsErr < bestRMS:
-        #     bestRMS = rmsErr
 
+
+    print(f'Particle Swarm best kk, rms error = {bestKK}, {bestErr}')
     return rmserrRet
 
 def optLTspice(optParams, *args, **kwargs): # this is the evaluation function called by sciPy least-squares
     global spiceSimCount_lsq  # the iterCount_lsq is derived from the spice sim count
+    global spiceSimCount
+    global restartCount
 
-
-    # netlist_fname = kwargs['netlist_fnameD']
-    RunLTstring = kwargs['RunLTstringD']
+    netlist_fname = kwargs['netlist_fnameD']
     LTspice_outputfile = kwargs['LTspice_outputfileD']
-    LTspice_output_node = kwargs['LTspice_output_nodeD']
+    LTspice_output_expr = kwargs['LTspice_output_exprD']
     matchMode = kwargs['matchModeD']
     target = kwargs['targetD']
     errWeights = kwargs['errWeightsD']
+    fileName = kwargs['fileNameD']
     # numlines_netlist = kwargs['numlines_netlistD']
     # netlist = kwargs['netlistD']
     nomParams = kwargs['nomParamsD']
     # OptLine = kwargs['OptLineD']
     numOptd = kwargs['numOptdD']
     maxIter_lsq = kwargs['maxIter_lsqD']
+    LTC = kwargs['LTC_D']
     componentVal = np.zeros(numOptd)
     for k in range(numOptd):
         componentVal[k] = optParams[k]*nomParams[k]  # de-normalize
     update_netlist(passCellDict,componentVal)
-    time.sleep(0.1)
-    runSim(LTspice_outputfile,RunLTstring)  # get result by reading spice output file
+    # time.sleep(0.1)
 
-    LTR = RawRead(LTspice_outputfile)
-    outNode = LTR.get_trace(LTspice_output_node)
+    LTR = runMySim(LTC, fileName, netlist_fname,False)
 
-    if matchMode < 4:  # freq sweep sim
-        fresp = np.abs(outNode)
-        freqx = LTR.get_trace('frequency')
-        freqx = np.abs(freqx)
-        if matchMode == 2 or matchMode == 3:
-            phase = np.unwrap(np.angle(outNode))
+    outNode = LTR.get_trace(LTspice_output_expr)
+    fresp = np.abs(outNode)
+    freqx = LTR.get_trace('frequency')
+    freqx = np.abs(freqx)
 
-        if matchMode == 1:  # ampl only
-            optCurrent = fresp
-        if matchMode == 2:  # phase only
-            optCurrent = phase
-        if matchMode == 3:  # ampl and phase
-            optCurrent = np.concatenate((fresp, phase))
+    if matchMode == 1:  # ampl only
+        optCurrent = fresp
+    if matchMode == 2:  # phase only
+        optCurrent = np.unwrap(np.angle(outNode))
 
-        if len(target) != len(optCurrent):
-            print('ERROR, something went wrong with the LTspice sim...')
-            sys.exit()
-    if matchMode == 4:  # time-domain transient sim
-        numTimePoints = passCellDict['numTimePointsD']
-        timex = LTR.get_trace('time')
-        timex = np.abs(timex)  ## sometimes the function returns a neg value, but otherwise correct ??
-        timexLinspace = np.linspace(np.min(timex), np.max(timex), numTimePoints)
-        optCurrent = np.interp(timexLinspace, timex, outNode)
+    if len(target) != len(optCurrent):
+        print('ERROR, something went wrong with the LTspice sim...')
+        sys.exit()
 
 
     err = target - optCurrent  # error between target and current response
@@ -212,10 +209,8 @@ def optLTspice(optParams, *args, **kwargs): # this is the evaluation function ca
         rmsErr = np.sqrt(np.mean(err ** 2))
        # printme = "least-sq spice sim count, rms Err = " + str(spiceSimCount_lsq) + " " + str(rmsErr)
         printme = "least-sq iteration count, rms Err = " + str(iterationCount_lsq) + " " + str(rmsErr)
-        print('\r',printme, end = "")
-
-
-
+        # print('\r',printme, end = "")
+        print(printme)
     spiceSimCount_lsq += 1
 
     return err
@@ -240,33 +235,12 @@ def update_netlist(kwargs,componentVal)  :
             thisLine = netlist[k]
             fid_wr_netlist.write(' '.join(thisLine) + '\n')
     return
-def runSim(LTspice_outputfile, RunLTstring) :
-    # run an LTspice sim. Assumes netlist is already written.
-    # this code will stall until the .raw file has been written
-    # The LTspice sim time can be highly variable in cases where it's
-    # difficult to find a DC operating point
-    if(os.path.isfile(LTspice_outputfile)) :
-        os.remove(LTspice_outputfile) # delete in case of previous pass
-    # Create an empty raw file
-    with open(LTspice_outputfile, 'w') as fp:
-        pass
-    # get hash of .raw file so we know when the spice sim is done
-    md5=hashlib.md5(open(LTspice_outputfile,'rb').read()).hexdigest()
-    # Run the simulation. First check to make sure LTspice is not running from last call
-    status = subprocess.call(RunLTstring, shell=True) # run it
-    md5_post = md5 # start by assuming its not done (hash hasnt changed)
-    while md5_post == md5 : # sleep until the hash of the raw file changes
-        time.sleep(0.2)
-        md5_post=hashlib.md5(open(LTspice_outputfile,'rb').read()).hexdigest()
-    if status:
-        print('ERROR, LTspice sim failed to run. Check setup')
-        sys.exit()
-    time.sleep(0.2)
+
 
 # **********************************************************
 # reads in the original schematic and replaces the instance values
 # with the optimized insatnce values
-def update_schematic(pass2schem, simControlDict, optParams):
+def update_schematic(pass2schem, optParams):
 
     numOptd = pass2schem['numOptdD']
     OptLine = pass2schem['OptLineD']
@@ -274,16 +248,17 @@ def update_schematic(pass2schem, simControlDict, optParams):
     netlist = pass2schem['netlistD']
     filePath = pass2schem['filePathD']
     fileName = pass2schem['fileNameD']
-    simctrlInstTol = simControlDict['simControlInstTolD']
-    simctrlOptInstNames = simControlDict['simControlOPtInstNamesD']
+    simctrlInstTol = pass2schem['simControlInstTolD']
+    simctrlOptInstNames = pass2schem['simControlOptInstNamesD']
     # Read in schematic to update
     schem_fname = os.path.join(filePath, fileName + '.asc')
     with open(schem_fname, 'r') as file:
         schem = file.readlines()
-
     changeNext = False
     roundStringNext = 'E96'
     new_schem = []
+    optFile = open("optParams.txt", "w")
+    optFile.write("InstName\t\t OptValue\t\t quantizedValue\n")
 
     for line in schem:
         line = line.strip().split()
@@ -294,6 +269,7 @@ def update_schematic(pass2schem, simControlDict, optParams):
 
             line[2] = f'{newVal:.3e}'
             print(f'Inst, opt val, quantized val = {instNm} {instValNext} {newVal:.3e}')
+            optFile.write(f'{instNm}\t\t{instValNext}\t\t{newVal:.3e}\n')
             changeNext = False
 
         if line[1] == 'InstName':
@@ -312,7 +288,18 @@ def update_schematic(pass2schem, simControlDict, optParams):
         # test if there is a .param line, like 'TEXT -40 -88 Left 2 !.param C2VAL 1.3nf'
         testParam = '!.param'
         if testParam in line:
+            idx = line.index(testParam)+1
+            if len(line) == (idx + 1):  # new style schem with =, split to create a stand-alone value field
+                try:
+                    temp = line[idx].split('=')
+                    line[idx] = temp[0]
+                    line.append(temp[1])
+                    # print('new Line = ',Line)
+                except:
+                    pass
+        if testParam in line:
             idx = line.index(testParam) #  next position in line holds value of param
+
             paramName = line[idx+1]
             for kk in range(numOptd):
                 if netlist[OptLine[kk]][1] == paramName:
@@ -323,10 +310,13 @@ def update_schematic(pass2schem, simControlDict, optParams):
                     newVal = newVal[0].astype('float')  # change from type ndarray to single float
                     line[idx + 2] = f'{newVal:.3e}'
                     print(f'Param, opt val, quantized val = {paramName} {instVal} {newVal:.3e}')
-
+                    optFile.write(f'{paramName}\t\t{instVal}\t\t{newVal:.3e}\n')
 
         new_schem.append(' '.join(line) + '\n')
 
+
+
+    optFile.close()
     # Write new schem file
     schem_fname = os.path.join(filePath, fileName + '_opt.asc')
     with open(schem_fname, 'w') as file:
@@ -440,55 +430,452 @@ def round63(X, ser, rnd=None):
 
     return Y
 
+def csvParseTarget(rows,matchMode,argc):
+    numrows = len(rows)
+    numcols = len(rows[0])
+    ret = {}
+    found = 0
+    Xvar = rows[0][0]  #  can be frequency or time
+    #  column headers can be 'target_ampl', 'target_phase','target_voltage', or 'weight'
+    if Xvar != 'frequency':
+        print('ERROR, 1st column header in target file is not "frequency"')
+        sys.exit()
 
+        #  search for 'weight'
+    found = 0
+    for k in range(numcols):
+        if rows[0][k] == 'weight':
+            found = 1
+            err_weights = [i[k] for i in rows]
+            err_weights = err_weights[1:]
+
+
+
+    if found == 0 and argc == 3:
+        print('INFO: There are 3 input files, but no column is found for weights in 2nd (csv) file\n')
+        print('INFO: The target will be taken from the .raw file; therefore the 2nd csv file is not used\n')
+        err_weights = [1.0] * (numrows - 1)
+
+    if argc == 2:
+        if found == 0:
+            print('INFO: no column found for weights, filling with 1.0')
+            err_weights = [1.0] * (numrows - 1)
+        if matchMode == 1 and (rows[0][1] != 'target_ampl' and rows[0][1] != 'weight'):
+            print('ERROR, matchMode set to 1, but 2nd column header in target file is not "target_ampl" or "weight"')
+            sys.exit()
+        if matchMode == 2 and (rows[0][1] != 'target_phase' and rows[0][1] != 'weight'):
+            print('ERROR, matchMode set to 2, but 2nd column header in target file is not "target_phase" or "weight"')
+            sys.exit()
+
+
+    freqx = [i[0] for i in rows]
+    freqx = freqx[1:]
+
+    if rows[0][1] == 'target_ampl':
+        target = [i[1] for i in rows]
+        target = target[1:]
+    elif rows[1][0] == 'target_phase':
+        target = [i[1] for i in rows]
+        target = target[1:]
+    else:  # set target to 0's, assume it will be written later by reading a .raw file
+        target = [0.0] * (numrows-1)
+
+
+
+    ret['matchMode'] = matchMode
+    ret['err_weights_csv'] = err_weights
+    ret['target_csv'] = target
+    ret['freqx_csv'] = freqx
+
+    return ret
+
+
+def csvParse(rows):
+    numrows = len(rows)
+    ret = {}
+    found = 0
+    for k in range(numrows):
+        if rows[k][0] == 'varInstNames':
+            ret['simControlOptInstNamesD'] = rows[k][1:]
+            found = 1
+    if found == 0:
+        print('ERROR, did not find varInstNames row in csv control input file')
+        sys.exit()
+    found = 0
+    for k in range(numrows):
+        if rows[k][0] == 'varMinVals':
+            ret['simControlMinValsD'] = (rows[k][1:])
+            found = 1
+    if found == 0:
+        print('ERROR, did not find varMinVals row in csv input file')
+        sys.exit()
+    found = 0
+    for k in range(numrows):
+        if rows[k][0] == 'varMaxVals':
+            ret['simControlMaxValsD'] = (rows[k][1:])
+            found = 1
+    if found == 0:
+        print('ERROR, did not find varMaxVals row in csv input file')
+        sys.exit()
+    found = 0
+    for k in range(numrows):
+        if rows[k][0] == 'instTol':
+            ret['simControlInstTolD'] = rows[k][1:]
+            found = 1
+    if found == 0:
+        print('ERROR, did not find instTol row in csv input file')
+        sys.exit()
+
+    found = 0
+    for k in range(numrows):
+        if rows[k][0] == 'spicePath':
+            ret['spicePathD'] = rows[k][1]
+            found = 1
+    if found == 0:
+        print('ERROR, did not find spicePath row in csv input file')
+        sys.exit()
+
+    found = 0
+    for k in range(numrows):
+        if rows[k][0] == 'filePath':
+            ret['filePathD'] = rows[k][1]
+            found = 1
+    if found == 0:
+        print('ERROR, did not find filePath row in csv input file')
+        sys.exit()
+
+    found = 0
+    for k in range(numrows):
+        if rows[k][0] == 'fileName':
+            base, extension = os.path.splitext(rows[k][1])  #  remove .asc if user types it
+            ret['fileNameD'] = base
+            found = 1
+    if found == 0:
+        print('ERROR, did not find fileName row in csv input file')
+        sys.exit()
+
+    found = 0
+    for k in range(numrows):
+        if rows[k][0] == 'outputVar':
+            ret['LTspice_output_exprD'] = rows[k][1]
+            found = 1
+    if found == 0:
+        print('ERROR, did not find outputVar row in csv input file')
+        sys.exit()
+
+    found = 0
+    for k in range(numrows):
+        if rows[k][0] == 'maxIter_lsq':
+            ret['maxIter_lsqD'] = int(rows[k][1])
+            found = 1
+    if found == 0:
+        print('ERROR, did not find maxIter_lsq row in csv input file')
+        sys.exit()
+
+    found = 0
+    for k in range(numrows):
+        if rows[k][0] == 'maxIter_ps':
+            ret['maxIter_psD'] = int(rows[k][1])
+            found = 1
+    if found == 0:
+        print('ERROR, did not find maxIter_ps row in csv input file')
+        sys.exit()
+
+    found = 0
+    for k in range(numrows):
+        if rows[k][0] == 'matchMode':
+            ret['matchModeD'] = int(rows[k][1])
+            found = 1
+    if found == 0:
+        print('ERROR, did not find matchMode row in csv input file')
+        sys.exit()
+
+    found = 0
+    for k in range(numrows):
+        if rows[k][0] == 'plotXaxis':
+            ret['plotXaxisD'] = rows[k][1]
+            found = 1
+    if found == 0:
+        print('Warning, did not find plotXaxis row in csv input file, defaulting to Log')
+        ret['plotXaxisD'] = 'Log'
+
+    return ret
+
+
+
+def runMySim(LTC,fileName,netlist_fname,optFlag):
+    global spiceSimCount, restartCount
+
+    try:
+        if optFlag:
+            LTspice_outputfile2 = f'.\\tempSim\\{fileName}_opt_{spiceSimCount}.raw '
+        else:
+            LTspice_outputfile2 = f'.\\tempSim\\{fileName}_{spiceSimCount}.raw '
+        LTC.run_now(netlist_fname)
+        time.sleep(0.02)
+        LTR = RawRead(LTspice_outputfile2)
+        # outNode = LTR.get_trace(LTspice_output_expr)
+    except:
+        print('re-trying sim, raw file read and get-trace ...\n')
+        time.sleep(2)
+        try:
+            restartCount += 1
+            spiceSimCount += 1
+            if optFlag:
+                LTspice_outputfile2 = f'.\\tempSim\\{fileName}_opt_{spiceSimCount}.raw '
+            else:
+                LTspice_outputfile2 = f'.\\tempSim\\{fileName}_{spiceSimCount}.raw '
+            LTC.run_now(netlist_fname)
+            time.sleep(0.2)
+            LTR = RawRead(LTspice_outputfile2)
+
+        except:
+            print('ERROR, raw file read re-try after delay failed for file ', LTspice_outputfile2)
+            e_type, e_object, e_traceback = sys.exc_info()
+            e_line_number = e_traceback.tb_lineno
+            print(f'exception line number: {e_line_number}')
+            sys.exit(0)
+    spiceSimCount += 1
+    if (spiceSimCount % 64) == 0:
+        LTC.file_cleanup()
+
+    return LTR
+
+
+
+
+
+
+
+
+
+
+
+
+
+# *********************************************************
+# ************************** Main *************************
+# *********************************************************
+# *********************************************************
+# ************************** Main *************************
+# *********************************************************
 # *********************************************************
 # ************************** Main *************************
 # *********************************************************
 
 def main():
-    global passcellDict
-    updateType = 0
-    simControlDict = simControl()  # Read simulation control input file, filled out by user
+    # global passcellDict
+    global spiceSimCount
+    global restartCount
 
-    fileName = simControlDict['fileNameD']
-    spicePath = simControlDict['spicePathD']
-    filePath = simControlDict['filePathD']
-    simControlOPtInstNames = simControlDict['simControlOPtInstNamesD']
-    simControlMinVals = simControlDict['simControlMinValsD']
-    simControlMaxVals = simControlDict['simControlMaxValsD']
-    simControlInstTol= simControlDict['simControlInstTolD']
-    LTspice_output_node = simControlDict['LTSPice_output_nodeD']
-    matchMode = simControlDict['matchModeD']
-    maxIter_lsq = simControlDict['maxIter_lsqD']
-    maxIter_ps = simControlDict['maxIter_psD']
-    if matchMode == 4: # time domain sim
-        numTimePoints = simControlDict['numTimePointsD']
+    # ********* parse the command-line input args, read in the setup and target files *****
+    #  *** possible input scenarios
+    ## setup file, always required, sets matchMode
+    # mode 1 - fresp ampl match, target and weights from csv file, 3 cols, freq, ampl, weights)
+    # mode 2 - phase match, target and weights from csv file ( 3 cols, freq, phaseTarget, weights)
+    # if weights not found, default to all 1's
+    # input args are one of
+    #   setup file, target file, or
+    #   setup file, target file (weights only), .raw file for target
+    #   setup file, .raw file for target (weights defualt to 1.0)
 
 
+    restartCount = 0
 
+    argc= len(sys.argv) #  1 means no extra args
+    argc-= 1  # only include the passed arge
+    if argc< 2:  # valid lengths are 2 or 3
+        print('ERROR, need a least 2 input arguments')
+        sys.exit(0)
+
+    fileName_argv = [None] * argc
+    ext = [None] * argc
+    for k in range(0,argc):
+        fileName_argv[k] = sys.argv[k+1]
+        split_tup = os.path.splitext(fileName_argv[k])
+        ext[k] = split_tup[1]  # get extension
+
+    if ext[0] != '.csv':
+        print('error, 1st command-line argument must be a csv setup filename!')
+        sys.exit(0)
+    if ext[1] != '.csv' and ext[1] != '.raw':
+        print('ERROR, 2nd argument ( to set target response) must be either a csv file or a LTspice .raw file\n')
+        sys.exit(0)
+
+    if argc == 3 and ext[2] != '.raw':
+        print('ERROR, 3rd argument must be an LTspice .raw file\n')
+        sys.exit(0)
+
+    rawRefFlag = False
+
+    if argc== 3:
+        if ext[2] == '.raw':
+            rawRefFlag = True
+    if ext[1] == '.raw':
+        rawRefFlag = True
+    try:
+        fcsv = open(fileName_argv[0])
+    except:
+        print('ERROR, file ', fileName_argv[0], 'not found\n')
+        e_type, e_object, e_traceback = sys.exc_info()
+        e_line_number = e_traceback.tb_lineno
+        print(f'exception line number: {e_line_number}')
+        sys.exit(0)
+    print('Reading setup file ',fileName_argv[0], '\n')
+    csvreader = csv.reader(fcsv)
+    rows = []
+    for row in csvreader:
+        rows.append(row)
+
+    ret = csvParse(rows)
+
+    simControlOptInstNames = ret['simControlOptInstNamesD']
+    simControlMinVals = ret['simControlMinValsD']
+    simControlMaxVals = ret['simControlMaxValsD']
+    simControlInstTol = ret['simControlInstTolD']
+    spicePath = ret['spicePathD']
+    filePath = ret['filePathD']
+    fileName = ret['fileNameD']
+    LTspice_output_expr = ret['LTspice_output_exprD']
+    maxIter_lsq = ret['maxIter_lsqD']
+    maxIter_ps = ret['maxIter_psD']
+    matchMode = ret['matchModeD']
+    plotXaxis = ret['plotXaxisD']
+    if plotXaxis == 'Log':
+        logFlag = 1
+    else:
+        logFlag = 0
+    # if matchMode == 4:
+    #     numTimePoints = ret['numTimePointsD']
+    fcsv.close()
     # Derived file paths and run scripts
     netlist_fname = f'{filePath}{fileName}.net'  # Netlist filename
+    schem_fname = f'{filePath}{fileName}.asc'  # Netlist filename
     LTspice_outputfile = f'{filePath}{fileName}.raw'  # sim results filename
-    RunLTstring = f'start "LTspice" "{spicePath}" -b "{filePath}{fileName}.net"'
+    print('Done reading setup file ', fileName_argv[0], '\n')
 
+
+    #  READ 2nd file from command line
+    err_weights_defined = 0
+    if ext[1] == '.csv':
+        try:
+            fcsv = open(fileName_argv[1])
+        except:
+            print('ERROR, file ',fileName_argv[1],' not found\n')
+            e_type, e_object, e_traceback = sys.exc_info()
+            e_line_number = e_traceback.tb_lineno
+            print(f'exception line number: {e_line_number}')
+            sys.exit(0)
+        csvreader = csv.reader(fcsv)
+        rows = []
+        for row in csvreader:
+            rows.append(row)
+        ret2 = csvParseTarget(rows, matchMode,argc)
+
+        err_weights_csv = (np.array(ret2['err_weights_csv'])).astype(float) # if not found, it is set to 1.0
+        err_weights_defined = 1
+        target_csv = (np.array(ret2['target_csv'])).astype(float)  # if not found, set to 0.0, will be set later by .raw reference file
+        freqx_csv = (np.array(ret2['freqx_csv'])).astype(float)
+        fcsv.close()
+        print('Done reading target csv file ', fileName_argv[1])
+
+
+    #  case when the 2nd arg is a .raw file; weights are stuck at 1.0
+    if (argc == 2) and ext[1] == '.raw':
+        refSchem_fname = f'{filePath}{fileName_argv[1]}'
+        print("Reading raw target file ", refSchem_fname)
+        try:
+            LTR = RawRead(refSchem_fname)
+        except:
+            print('ERROR, could not find or read .raw file\n')
+            e_type, e_object, e_traceback = sys.exc_info()
+            e_line_number = e_traceback.tb_lineno
+            print(f'exception line number: {e_line_number}')
+            sys.exit(0)
+
+        #  note that this is not an auto-run sim, so don't append the simcount to the filename
+        #  (and don't increment the simcount)
+        try:
+            outNode = LTR.get_trace('V(optTarget)')
+            freqxRefSchem = LTR.get_trace('frequency')
+            freqxRefSchem = np.abs(freqxRefSchem)
+        except:
+            print('ERROR, could not find node "optTarget" in reference raw file, please check your reference schematic\n')
+
+            sys.exit(0)
+
+        time.sleep(0.01)
+        if matchMode == 1:
+            targetRefSchem = np.abs(outNode)
+        if matchMode == 2:
+            targetRefSchem = np.unwrap(np.angle(outNode))
+
+
+
+    # optional 3rd input arg, expecting a .raw file from the simulation of another schematic
+    if (argc== 3):
+        if ext[2] != '.raw':
+            print('error, 3rd command-line argument must be an LTspice .raw file!')
+            sys.exit(0)
+        refSchem_fname = f'{filePath}{fileName_argv[2]}'
+        print("Reading raw file ", refSchem_fname)
+        try:
+            LTR = RawRead(refSchem_fname)
+        except:
+            print('ERROR, could not find or read .raw target file\n')
+            e_type, e_object, e_traceback = sys.exc_info()
+            e_line_number = e_traceback.tb_lineno
+            print(f'exception line number: {e_line_number}')
+            sys.exit(0)
+
+        #  note that this is not an auto-run sim, so don't append the simcount to the filename
+        #  (and don't increment the simcount)
+        try:
+            outNode = LTR.get_trace('V(optTarget)')
+            freqxRefSchem = LTR.get_trace('frequency')
+            freqxRefSchem = np.abs(freqxRefSchem)
+        except:
+            print('ERROR, could not find node "optTarget" in reference raw file, please check your reference schematic\n')
+            sys.exit(0)
+
+        time.sleep(0.01)
+        if matchMode == 1:
+            targetRefSchem = np.abs(outNode)  #  pretend this came from the csv file instead of a sim
+        if matchMode == 2:
+            targetRefSchem = np.unwrap(np.angle(outNode))
+
+    # done input command line parsing
+
+
+    LTC = SimRunner(output_folder='./tempSim')
+    LTC.file_cleanup()
+
+    passCellDict['LTC_D'] = LTC
+
+    updateType = 0
     passCellDict['spicePathD'] = spicePath
     passCellDict['filePathD'] = filePath
     passCellDict['fileNameD'] = fileName
     passCellDict['filePathD'] = filePath
     passCellDict['netlist_fnameD'] = netlist_fname
-    passCellDict['RunLTstringD'] = RunLTstring
     passCellDict['LTspice_outputfileD'] = LTspice_outputfile
-    passCellDict['LTspice_output_nodeD'] = LTspice_output_node
+    passCellDict['LTspice_output_exprD'] = LTspice_output_expr
     passCellDict['matchModeD'] = matchMode
     passCellDict['maxIter_lsqD'] = maxIter_lsq
     passCellDict['maxIter_psD'] = maxIter_ps
-    if matchMode == 4:
-        passCellDict['numTimePointsD'] = numTimePoints
+    passCellDict['simControlInstTolD'] = simControlInstTol
+    passCellDict['simControlOptInstNamesD'] = simControlOptInstNames
+    # if matchMode == 4:
+    #     passCellDict['numTimePointsD'] = numTimePoints
     # Send command to write netlist
-    string = f'start "LTspice" "{spicePath}" -netlist "{filePath}{fileName}.asc"'
-    print(f'Issuing command to write LTspice netlist\n{string}')
-    status = subprocess.call(string, shell=True)
-    time.sleep(0.2) # in theory, subprocess.call is 'blocking', but it doesn't always work, so...
+
+    print(f'Issuing command to write LTspice netlist from asc file ',schem_fname)
+    try:
+        LTC.create_netlist(schem_fname)
+    except:
+        print('ERROR, could not create netlist from file ',schem_fname)
+        sys.exit(0)
+    time.sleep(0.1)
 
 
     # Read in the initial netlist. This will be held in memory and modified for every
@@ -496,9 +883,24 @@ def main():
     # the netlist will be written to a file for each pass, so that LTspice can run
     with open(netlist_fname, 'r') as fid:
         netlist = fid.readlines()
-
-    netlist = [line.strip().split() for line in netlist]  # Split lines into words
+    test = 1
+    netlist = [line.strip().split() for line in netlist]  # Split list into one list per line
     numlines_netlist = len(netlist)
+
+    for k in range(numlines_netlist):  # Find all .inst and change to old style netlist with no "="
+        Line = netlist[k]
+        if Line[0] == '.param' and len(Line) == 2:  #  new style, old style would have length 3 line (.param, paramName, paramValue)
+
+            try:
+                temp = Line[1].split('=')
+                Line[1] = temp[0]
+                Line.append(temp[1])
+                # print('new Line = ',Line)
+            except:
+                pass
+        netlist[k] = Line
+
+
     passCellDict['netlistD'] = netlist
     passCellDict['numlines_netlistD'] = numlines_netlist
 
@@ -506,7 +908,7 @@ def main():
     # to the line number in the netlist of those components
     # this makes the least-squares evaluation function faster because it doesn't
     # need to search through the entire netlist each time
-    numOptd = len(simControlOPtInstNames)  # Number of instances being optimized
+    numOptd = len(simControlOptInstNames)  # Number of instances being optimized
     OptLine = [0] * numOptd  # An array that points to the netlist lines with the instance names to be optimized
 
 
@@ -514,17 +916,17 @@ def main():
     OptLine = [0] * numOptd  # Initialize the OptLine array
     UB = [0.0] * numOptd  # Initialize the upper bound array
     LB = [0.0] * numOptd  # Initialize the lower bound array
-    refType = [0] * numOptd  # Initialize the r-l-c part type array (0=R,1=L,2=C)
-
+    # refType = [0] * numOptd  # Initialize the r-l-c part type array (0=R,1=L,2=C)
+    # print(' scanning to look for any of these ',simControlOptInstNames)
     for kk in range(numOptd):  # search all opt instance names to see if they are on the kth netlist line
         for k in range(numlines_netlist):  # Go through all netlist lines to look for this instance
             thisLine = netlist[k]
-            #  if simControlOPtInstNames[kk] in thisLine[0]:
-            #  if thisLine[0].count(simControlOPtInstNames[kk]) > 0:
-            #  print(simControlOPtInstNames[kk])
-            #  print(thisLine)
+
             for j in range(len(thisLine)): # scan the netlist line to see if it contains the optInstName
-                if thisLine[j] == simControlOPtInstNames[kk]: # this could be an instance OR a parameter
+                # print('thisLine[j], simControlOptInstNames[kk] = ',thisLine[j], " ", simControlOptInstNames[kk])
+                cond1 = (thisLine[j] == simControlOptInstNames[kk])
+                if cond1: # this could be an instance OR a parameter
+
                     OptLine[kkk] = k
                     UB[kkk] = float(simControlMaxVals[kk])  # Upper bound to pass to optimizer
                     LB[kkk] = float(simControlMinVals[kk])  # Lower bound to pass to optimizer
@@ -532,12 +934,13 @@ def main():
                     break
 
     numMatchingInstFound = kkk
+    print('NUm Matches = ',numMatchingInstFound)
 
     if numOptd != numMatchingInstFound:
         print('ERROR;')
-        print(f'number of instances to be optimized in control file = {numOptd}')
+        print(f'number of instances and/or params to be optimized in control file = {numOptd}')
         print(f'number of matching instances found in netlist = {numMatchingInstFound}')
-        print('check Instance name spelling in control file')
+        print('check Instance/param name spelling in control file')
         sys.exit()
 
     passCellDict['numOptdD'] = numOptd
@@ -593,65 +996,81 @@ def main():
         #     print("error, nom instance value outside given bounds ",netlist[OptLine[k]][0])
         #     raise Exception("ERROR, component value outside given bounds")
 
-    print('\nLTspice output node from setup file = ',LTspice_output_node,'\n')
-    print('LTspice run command = ',RunLTstring,'\n')
+    print('\nLTspice output expression from setup file = ',LTspice_output_expr,'\n')
     if matchMode == 1:
         print('Match mode = Amplitude Only\n')
     if matchMode == 2:
         print('Match mode = Phase Only\n')
-    if matchMode == 3:
-        print('Match mode = Amplitude + Phase\n')
-    if matchMode == 4:
-        print('Match mode = Transient sim waveform\n')
+
 
     x = input('Check accuracy above, enter C to continue or any other key to exit ')
     if x.lower() != 'c':
         sys.exit()
 
     # Run initial simulation to get frequencies
-    print(f'Issuing command to run initial LTspice simulation\n{RunLTstring}')
+    print(f'Issuing command to run initial LTspice simulation')
+    spiceSimCount = 1
 
-    runSim(LTspice_outputfile,RunLTstring)
-    
-    # read the .raw sim results
-    LTR = RawRead(LTspice_outputfile)
-    outNode = LTR.get_trace(LTspice_output_node)
-    if matchMode < 4: # freq response sim
-        fresp = np.abs(outNode)
-        if matchMode == 2 or matchMode == 3: # only compute phase if you are going to use it
-            phase = np.unwrap(np.angle(outNode))
-        freqx = LTR.get_trace('frequency')
-        freqx = np.abs(freqx)
-        numFreqs = len(freqx)
-        [target, errWeights] = setTarget(freqx, matchMode)
-    if matchMode == 4: #  time-domain sim
-        timex = LTR.get_trace('time')
-        timex = np.abs(timex)  ## sometimes the function returns a neg value, but otherwise correct ??
-        timexLinspace = np.linspace(np.min(timex), np.max(timex), numTimePoints)
-        outNodeLinspace = np.interp(timexLinspace,timex,outNode)
-        [target, errWeights] = setTarget(timexLinspace) # target is a time-domain waveform
+    LTR = runMySim(LTC, fileName, netlist_fname,False)
+
+    outNode = LTR.get_trace(LTspice_output_expr)
+    freqx = LTR.get_trace('frequency')
+    freqx = np.abs(freqx)
+    numFreqs = len(freqx)
+
+    if not err_weights_defined:
+        errWeights = [1.0] * numFreqs
+
+
+    if rawRefFlag == False:   #target is from csv file
+        # check to make sure the 1st and last points in the target setup file correspond to the min and max freqs in the LTspice sim
+        if freqx[0] != freqx_csv[0]:
+            print(
+                'ERROR, 1st frequency point in the LTspice simulation is not the same as the 1st freq point in the target setup file');
+            sys.exit()
+        if freqx[-1] != freqx_csv[-1]:
+            print(
+                'ERROR, last frequency point in the LTspice simulation is not the same as the last freq point in the target setup file');
+            sys.exit()
+        errWeights = np.interp(freqx, freqx_csv, err_weights_csv)  # note err_weights_csv defined in target file
+        if matchMode == 1:
+            fresp = np.abs(outNode)  # for plotting
+            target = np.interp(freqx, freqx_csv, target_csv)  # note target_csv  is fresp
+        if matchMode == 2:
+            phase = np.unwrap(np.angle(outNode))  #  for plotting
+            target = np.interp(freqx, freqx_csv, target_csv)  # note target_csv is phase
+
+    if rawRefFlag == True:  # target is from raw file
+        # check to make sure the 1st and last points in the target setup file correspond to the min and max freqs in the LTspice sim
+        if freqx[0] != freqxRefSchem[0]:
+            print('ERROR, 1st frequency point in the LTspice simulation is not the same as the 1st freq point in ref schematic sweep');
+            sys.exit()
+        if freqx[-1] != freqxRefSchem[-1]:
+            print('ERROR, last frequency point in the LTspice simulation is not the same as the last freq in the ref schematic sweep');
+            sys.exit()
+        if matchMode == 1:
+            fresp = np.abs(outNode)  # for plotting
+            target = np.interp(freqx, freqxRefSchem, targetRefSchem)  # note targetRefSchem  is fresp
+        if matchMode == 2:
+            phase = np.unwrap(np.angle(outNode))  # for plotting
+            target = np.interp(freqx, freqxRefSchem, targetRefSchem)  # note targetRefSchem is phase
+        if err_weights_defined:
+            test = 1
+            errWeights = np.interp(freqx, freqx_csv, err_weights_csv)  # note target_csv is phase
+
 
 
 
     passCellDict['targetD'] = target
     passCellDict['errWeightsD'] = errWeights
-    if matchMode==3: # target is concatenation of ampl and phase, seperate out for plotting
-        target_fresp = target[0:numFreqs]
-        errWeights_fresp = errWeights[0:numFreqs]
-        target_phase = target[numFreqs:]
-        errWeights_phase = errWeights[numFreqs:]
+
 
     # plot the results of the initial sim on top of the target response, as well as the error weights
 
     if matchMode == 1:  # Ampl only match
-        myPlot_2x_errweights('target/init sim', 'error weights','fresp',freqx,fresp,target,errWeights,'init sim','target',1,'target+init_sim.png')
+        myPlot_2x_errweights('target/init sim', 'error weights','fresp',logFlag,freqx,fresp,target,errWeights,'init sim','target',1,'target+init_sim.png')
     if matchMode == 2:  # Phase only match
-        myPlot_2x_errweights('target/init sim', 'error weights','phase',freqx,fresp,target,errWeights,'init sim','target',1,'target+init_sim.png')
-    if matchMode == 3:  # Both phase and ampl match
-        myPlot_2x_errweights('target/init sim', 'error weights','fresp',freqx,fresp,target,errWeights,'init sim','target',1,'target+init_sim.png')
-        myPlot_2x_errweights('target/init sim', 'error weights','phase',freqx,fresp,target,errWeights,'init sim','target',1,'target+init_sim.png')
-    if matchMode == 4: # time domain sim
-        myPlot_2x_errweights('target/init sim', 'error weights','transient',timexLinspace,outNodeLinspace,target,errWeights,'init sim','target',1,'target+init_sim.png')
+        myPlot_2x_errweights('target/init sim', 'error weights','phase',logFlag,freqx,phase,target,errWeights,'init sim','target',1,'target+init_sim.png')
 
     x = input('Check initial sim and target plots, enter C to continue or any other key to exit ')
     if x.lower() != 'c':
@@ -674,30 +1093,43 @@ def main():
     # so that ltspice sim can see a difference in the response when the components are wiggled
 
     print('\n**************\nEntering Particle-swarm Global Optimization Loop, please be patient ...\n************')
+
+
     # Set-up hyperparameters
     options = {'c1': 0.5, 'c2': 0.3, 'w': 0.9}
     bounds = (LB, UB)
     n_particles = 30
     passCellDict['numParticlesD'] = n_particles
+    #  init pos has dimensions n_particles, numOptd
+    init_pos = np.empty((n_particles,numOptd))
+    # make 1st particle = init schematic values
+    init_pos[0, :] = np.ones((1,numOptd))
+    for k in range(1,n_particles):  #  fill the rest with rand, scaled and offset to fit within LB and UB
+        for j in range(numOptd):
+            init_pos[k,j] = random.uniform(1.01*LB[j],0.99*UB[j])
+
     # Call instance of GlobalBestPSO
+    test = 0
     optimizer = ps.single.GlobalBestPSO(n_particles=n_particles, dimensions=numOptd,
-                                        options=options, bounds = bounds)
+                                        options=options, bounds = bounds, init_pos = init_pos)
     # Perform optimization
     bestCost,optParams = optimizer.optimize(pswarm, iters=maxIter_ps)
 
-    print('**************\nEntering Least-sq Optimization Loop, please be patient ...\n************')
+    LTC.file_cleanup()
 
-    if matchMode == 4: #  use bigger steps for time-domain sims
-        diffStep = 1.0e-2
-    else:
-        diffStep = 1.0e-5
+
+
+    print('**************\nEntering Least-sq Optimization Loop, please be patient ...\n************')
+    diffStep = 1.0e-5
+    # if matchMode == 4: #  use bigger steps for time-domain sims
+    #     diffStep = 1.0e-2
+    # else:
+    #     diffStep = 1.0e-5
 
     if maxIter_lsq > 0:
         optParams = least_squares(optLTspice, optParams,method = 'trf',bounds=(LB, UB),diff_step=diffStep, ftol=1e-5,kwargs=passCellDict).x  # Optimize using least_squares function
 
         # optParams = least_squares(optLTspice, optParams,method = 'trf',bounds=(LB, UB),diff_step=1e-5, ftol=1e-5,kwargs=passCellDict).x  # Optimize using least_squares function
-
-    #  passCellDict['XD'] = optParams
 
     print('************\nDONE! Generating outputs ...\n***********')
 
@@ -705,7 +1137,7 @@ def main():
     for k in range(numOptd):
         print(f'{netlist[OptLine[k]][0]} {optParams[k] * nomParams[k]}')
 
-    time.sleep(0.1)
+    # time.sleep(0.1)
     # Re-run simulation with current netlist.
     #  Just to make sure the simulation results are matched to the optimized component vals
 
@@ -714,34 +1146,31 @@ def main():
     for k in range(numOptd):
         componentVal[k] = optParams[k] * nomParams[k]  # de-normalize
     update_netlist(passCellDict, componentVal)
-    time.sleep(0.1)
-    print(f'Issuing command to run post-opt LTspice simulation\n{RunLTstring}')
-    runSim(LTspice_outputfile,RunLTstring)
-    print(f'Done simulation, plotting\n')
-    time.sleep(1)
-    LTR = RawRead(LTspice_outputfile)
-    outNode = LTR.get_trace(LTspice_output_node)
+    # time.sleep(0.1)
+    print(f'Issuing command to run post-opt LTspice simulation')
 
-    if matchMode < 4:
-        fresp_opt = np.abs(outNode)
-        if matchMode == 2 or matchMode == 3:
-            phase_opt = np.unwrap(np.angle(outNode))
+    LTR = runMySim(LTC, fileName, netlist_fname,False)
 
-    if matchMode == 4:  # time-domain sim
-        timex = LTR.get_trace('time')
-        timex = np.abs(timex)  ## sometimes the function returns a neg value, but otherwise correct ??
-        timexLinspace = np.linspace(np.min(timex), np.max(timex), numTimePoints)
-        outNodeLinspace = np.interp(timexLinspace, timex, outNode)
+    outNode = LTR.get_trace(LTspice_output_expr)
+    fresp_opt = np.abs(outNode)
+    if matchMode == 2:
+        phase_opt = np.unwrap(np.angle(outNode))
+
+    # if matchMode == 4:  # time-domain sim
+    #     timex = LTR.get_trace('time')
+    #     timex = np.abs(timex)  ## sometimes the function returns a neg value, but otherwise correct ??
+    #     timexLinspace = np.linspace(np.min(timex), np.max(timex), numTimePoints)
+    #     outNodeLinspace = np.interp(timexLinspace, timex, outNode)
 
     # plot opt results before schematic generation/component quantization
-    if matchMode == 1 or matchMode == 3:
-        myPlot_2x('opt vs target sim','fresp',freqx,fresp_opt,target,'opt response','target',1,'opt_vs_target.png')
+    if matchMode == 1:
+        myPlot_2x('opt vs target sim','fresp',logFlag,freqx,fresp_opt,target,'opt response','target',1,'opt_vs_target.png')
 
-    if matchMode == 2 or matchMode==3:  # Phase
-        myPlot_2x('opt vs target sim','phase',freqx,phase_opt,target,'opt response','target',1,'opt_vs_target.png')
+    if matchMode == 2:  # Phase
+        myPlot_2x('opt vs target sim','phase',logFlag,freqx,phase_opt,target,'opt response','target',1,'opt_vs_target.png')
 
-    if matchMode == 4:  # time domain sim
-        myPlot_2x('opt vs target sim','transient',timexLinspace,outNodeLinspace,target,'opt transient sim','target',1,'opt_vs_target.png')
+    # if matchMode == 4:  # time domain sim
+    #     myPlot_2x('opt vs target sim','transient',timexLinspace,outNodeLinspace,target,'opt transient sim','target',1,'opt_vs_target.png')
 
     # generate a new schematic with '_opt' appended to name, with the optimized values
     # Note the optimized values are quantized based on the user "E-series" inputs.
@@ -749,50 +1178,47 @@ def main():
     # I suggest you take the worst-tolerance components and remove them from the
     # list of instances to be optimized, and then re-run the optimizer based on the
     # new '_opt' schematic. 
-    update_schematic(passCellDict, simControlDict,optParams)  # Write a new _opt schematic (Quantization applied on write-out)
+    update_schematic(passCellDict,optParams)  # Write a new _opt schematic (Quantization applied on write-out)
     time.sleep(0.1)
-    print(f'\nNew schematic with optimum component values generated\nFilename = {filePath}{fileName}_opt.asc')
+
+    optFileName = f'{filePath}{fileName}_opt.asc'
+    # LTspice_outputfile_opt = f'{filePath}{fileName}_opt.raw'
+    netlist_fname_opt = f'{filePath}{fileName}_opt.net'
+
+    print(f'\nNew schematic with optimum component values generated\nFilename = {optFileName}')
 
     # Re-run simulation on the "_opt" schematic to check the quantization
     # Send command to write netlist
-    string = f'"{spicePath}" -netlist "{filePath}{fileName}_opt.asc"'
-    print(f'Issuing command to write new netlist from optimized schematic\n{string}')
-    status = subprocess.call(string, shell=True)
+    # string = f'"{spicePath}" -netlist "{filePath}{fileName}_opt.asc"'
+    print(f'Issuing command to write new netlist from optimized schematic\n')
+    LTC.create_netlist(optFileName)
+    # status = subprocess.call(string, shell=True)
     time.sleep(0.1)
-
-    RunLTstring_opt = f'"{spicePath}" -b "{filePath}{fileName}_opt.net"'
-    LTspice_outputfile_opt = f'{filePath}{fileName}_opt.raw'
 
     # Run sim on _Opt schematic
 
-    print(f'\nIssuing command to run post-opt LTspice simulation w quant values\n{RunLTstring_opt}')
-    
-    runSim(LTspice_outputfile_opt,RunLTstring_opt)
+    print(f'\nIssuing command to run post-opt sim on netlist {netlist_fname_opt}')
+    test = 1
 
-    LTR = RawRead(LTspice_outputfile_opt)
-    outNode = LTR.get_trace(LTspice_output_node)
+    LTR = runMySim(LTC, fileName, netlist_fname_opt,True)
 
-    #  compute quantized ampl/phase/time
-    if matchMode < 4:
-        fresp_opt_quant = np.abs(outNode)
-        if matchMode == 2 or matchMode == 3:
-            phase_opt_quant = np.unwrap(np.angle(outNode))
-    if matchMode == 4:  # time-domain sim
-        timex = LTR.get_trace('time')
-        timex = np.abs(timex)  ## sometimes the function returns a neg value, but otherwise correct ??
-        timexLinspace = np.linspace(np.min(timex), np.max(timex), numTimePoints)
-        outNodeLinspace_quant = np.interp(timexLinspace, timex, outNode)
+    outNode = LTR.get_trace(LTspice_output_expr)
+    fresp_opt_quant = np.abs(outNode)
+    if matchMode == 2:
+        phase_opt_quant = np.unwrap(np.angle(outNode))
+
 
     #  Plot the target, optimized, and quantized (from new schem) optimized responses
 
-    if matchMode == 1 or matchMode == 3:
-        myPlot_2x('opt_quant vs target sim', 'fresp', freqx, fresp_opt_quant, target, 'quant opt response','target', 1, 'optquant_vs_target.png')
+    if matchMode == 1:
+        myPlot_2x('opt_quant vs target sim', 'fresp', logFlag,freqx, fresp_opt_quant, target, 'quant opt response','target', 1, 'optquant_vs_target.png')
     if matchMode == 2:
-        myPlot_2x('opt_quant vs target sim', 'phase', freqx, phase_opt_quant, target, 'quant opt response', 'target', 1, 'optquant_vs_target.png')
-    if matchMode == 4:
-        myPlot_2x('opt_quant vs target sim','transient',timexLinspace,outNodeLinspace_quant,target,'opt quant transient sin','target',1,'optquant_vs_target.png')
-
+        myPlot_2x('opt_quant vs target sim', 'phase', logFlag,freqx, phase_opt_quant, target, 'quant opt response', 'target', 1, 'optquant_vs_target.png')
+    # if matchMode == 4:
+    #     myPlot_2x('opt_quant vs target sim','transient',timexLinspace,outNodeLinspace_quant,target,'opt quant transient sin','target',1,'optquant_vs_target.png')
+    print('Restart Count = ',restartCount)
     print('\n******* DONE! ******\n')
+    LTC.file_cleanup()
     # print('Best error from PS only was ',bestCost)
     x = input('any key to exit .... ')
     sys.exit()
